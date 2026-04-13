@@ -1321,14 +1321,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         area_id = room["area_id"]
         has_covers = bool(room.get("covers"))
 
-        if area_id not in self._entity_areas and hasattr(self, "async_add_entities") and self.async_add_entities:
-            from .sensor import _create_room_entities
-
-            entities = _create_room_entities(self, area_id)
-            self.async_add_entities(entities)
-            self._entity_areas.add(area_id)
-
-        # Climate entities (override control): always create
+        # Climate entities: always create
         if (
             area_id not in self._climate_entity_areas
             and hasattr(self, "async_add_climate_entities")
@@ -1338,16 +1331,6 @@ class RoomMindCoordinator(DataUpdateCoordinator):
 
             self.async_add_climate_entities(_create_room_climates(self, area_id))
             self._climate_entity_areas.add(area_id)
-
-        if (
-            area_id not in self._climate_control_switch_areas
-            and hasattr(self, "async_add_switch_entities")
-            and self.async_add_switch_entities
-        ):
-            from .switch import RoomMindClimateControlSwitch
-
-            self.async_add_switch_entities([RoomMindClimateControlSwitch(self, area_id)])
-            self._climate_control_switch_areas.add(area_id)
 
         # Cover entities: only create when covers are configured.
         # Not removed on save — cleanup_orphaned_entities() handles that at startup
@@ -1423,7 +1406,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         registry = er.async_get(self.hass)
 
         # Known valid suffixes for each condition
-        always_valid = ("_target_temp", "_mode", "_override", "_climate_control")
+        always_valid = ("_climate",)
         cover_only = ("_cover_auto", "_cover_paused")
         # Global entities (not per-room) that should never be cleaned up
         global_uids = {f"{DOMAIN}_vacation"}

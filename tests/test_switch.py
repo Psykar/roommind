@@ -9,7 +9,6 @@ import pytest
 
 from custom_components.roommind.const import DOMAIN, VACATION_SENTINEL_UNTIL
 from custom_components.roommind.switch import (
-    RoomMindClimateControlSwitch,
     RoomMindCoverAutoSwitch,
     RoomMindVacationSwitch,
     _create_room_switches,
@@ -123,16 +122,12 @@ async def test_async_setup_entry_creates_entities_for_rooms_with_covers():
     assert coordinator.async_add_switch_entities is async_add_entities
     async_add_entities.assert_called_once()
     entities = async_add_entities.call_args[0][0]
-    assert len(entities) == 4
+    assert len(entities) == 2
     assert isinstance(entities[0], RoomMindVacationSwitch)
-    climate_switches = [e for e in entities if isinstance(e, RoomMindClimateControlSwitch)]
     cover_switches = [e for e in entities if isinstance(e, RoomMindCoverAutoSwitch)]
-    assert len(climate_switches) == 2
     assert len(cover_switches) == 1
     assert "living_room" in coordinator._switch_entity_areas
     assert "bedroom" not in coordinator._switch_entity_areas
-    assert "living_room" in coordinator._climate_control_switch_areas
-    assert "bedroom" in coordinator._climate_control_switch_areas
 
 
 @pytest.mark.asyncio
@@ -157,9 +152,8 @@ async def test_async_setup_entry_no_covers_still_creates_vacation_switch():
 
     async_add_entities.assert_called_once()
     entities = async_add_entities.call_args[0][0]
-    assert len(entities) == 2
+    assert len(entities) == 1
     assert isinstance(entities[0], RoomMindVacationSwitch)
-    assert isinstance(entities[1], RoomMindClimateControlSwitch)
 
 
 @pytest.fixture
@@ -256,68 +250,3 @@ async def test_vacation_switch_turn_off(mock_vacation_coordinator):
     await switch.async_turn_off()
     store.async_save_settings.assert_awaited_once_with({"vacation_until": None})
     coordinator.async_request_refresh.assert_awaited_once()
-
-
-@pytest.fixture
-def mock_cc_coordinator():
-    coordinator = MagicMock()
-    coordinator.async_request_refresh = AsyncMock()
-    store = MagicMock()
-    coordinator.hass = MagicMock()
-    coordinator.hass.data = {DOMAIN: {"store": store}}
-    return coordinator, store
-
-
-def test_climate_control_switch_default_on(mock_cc_coordinator):
-    coordinator, store = mock_cc_coordinator
-    store.get_room.return_value = {}
-    switch = RoomMindClimateControlSwitch(coordinator, "living_room")
-    assert switch.is_on is True
-
-
-def test_climate_control_switch_off(mock_cc_coordinator):
-    coordinator, store = mock_cc_coordinator
-    store.get_room.return_value = {"climate_control_enabled": False}
-    switch = RoomMindClimateControlSwitch(coordinator, "living_room")
-    assert switch.is_on is False
-
-
-def test_climate_control_switch_on_explicit(mock_cc_coordinator):
-    coordinator, store = mock_cc_coordinator
-    store.get_room.return_value = {"climate_control_enabled": True}
-    switch = RoomMindClimateControlSwitch(coordinator, "living_room")
-    assert switch.is_on is True
-
-
-def test_climate_control_switch_room_missing(mock_cc_coordinator):
-    coordinator, store = mock_cc_coordinator
-    store.get_room.return_value = None
-    switch = RoomMindClimateControlSwitch(coordinator, "living_room")
-    assert switch.is_on is True
-
-
-@pytest.mark.asyncio
-async def test_climate_control_switch_turn_on(mock_cc_coordinator):
-    coordinator, store = mock_cc_coordinator
-    store.async_update_room = AsyncMock()
-    switch = RoomMindClimateControlSwitch(coordinator, "living_room")
-    await switch.async_turn_on()
-    store.async_update_room.assert_awaited_once_with("living_room", {"climate_control_enabled": True})
-    coordinator.async_request_refresh.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_climate_control_switch_turn_off(mock_cc_coordinator):
-    coordinator, store = mock_cc_coordinator
-    store.async_update_room = AsyncMock()
-    switch = RoomMindClimateControlSwitch(coordinator, "living_room")
-    await switch.async_turn_off()
-    store.async_update_room.assert_awaited_once_with("living_room", {"climate_control_enabled": False})
-    coordinator.async_request_refresh.assert_awaited_once()
-
-
-def test_climate_control_switch_unique_id_and_entity_id(mock_cc_coordinator):
-    coordinator, _ = mock_cc_coordinator
-    switch = RoomMindClimateControlSwitch(coordinator, "living_room")
-    assert switch.unique_id == "roommind_living_room_climate_control"
-    assert switch.entity_id == "switch.roommind_living_room_climate_control"

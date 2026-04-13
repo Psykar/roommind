@@ -25,13 +25,9 @@ class TestCoverageGaps:
         hass.data = {DOMAIN: {"store": store}}
 
         # Simulate entity registry entries
-        entry_valid_temp = MagicMock()
-        entry_valid_temp.unique_id = f"{DOMAIN}_living_room_target_temp"
-        entry_valid_temp.entity_id = "sensor.roommind_living_room_target_temp"
-
-        entry_valid_mode = MagicMock()
-        entry_valid_mode.unique_id = f"{DOMAIN}_living_room_mode"
-        entry_valid_mode.entity_id = "sensor.roommind_living_room_mode"
+        entry_valid_climate = MagicMock()
+        entry_valid_climate.unique_id = f"{DOMAIN}_living_room_climate"
+        entry_valid_climate.entity_id = "climate.roommind_living_room"
 
         entry_valid_cover_auto = MagicMock()
         entry_valid_cover_auto.unique_id = f"{DOMAIN}_living_room_cover_auto"
@@ -43,8 +39,8 @@ class TestCoverageGaps:
 
         # Orphaned: room no longer exists
         entry_orphaned_room = MagicMock()
-        entry_orphaned_room.unique_id = f"{DOMAIN}_deleted_room_target_temp"
-        entry_orphaned_room.entity_id = "sensor.roommind_deleted_room_target_temp"
+        entry_orphaned_room.unique_id = f"{DOMAIN}_deleted_room_climate"
+        entry_orphaned_room.entity_id = "climate.roommind_deleted_room"
 
         # Non-roommind entity -- should be ignored
         entry_other = MagicMock()
@@ -58,8 +54,7 @@ class TestCoverageGaps:
         entry_vacation.entity_id = "switch.roommind_vacation"
 
         mock_registry.entities.values.return_value = [
-            entry_valid_temp,
-            entry_valid_mode,
+            entry_valid_climate,
             entry_valid_cover_auto,
             entry_valid_cover_paused,
             entry_orphaned_room,
@@ -74,7 +69,7 @@ class TestCoverageGaps:
             coordinator.cleanup_orphaned_entities()
 
         # Only the orphaned entity should be removed (vacation is global, not orphaned)
-        mock_registry.async_remove.assert_called_once_with("sensor.roommind_deleted_room_target_temp")
+        mock_registry.async_remove.assert_called_once_with("climate.roommind_deleted_room")
 
     def test_cleanup_orphaned_entities_removes_cover_entities_without_covers(self, hass, mock_config_entry):
         """cleanup_orphaned_entities removes cover entities when room has no covers configured."""
@@ -96,8 +91,8 @@ class TestCoverageGaps:
         entry_cover_paused.entity_id = "binary_sensor.roommind_living_room_cover_paused"
 
         entry_valid = MagicMock()
-        entry_valid.unique_id = f"{DOMAIN}_living_room_target_temp"
-        entry_valid.entity_id = "sensor.roommind_living_room_target_temp"
+        entry_valid.unique_id = f"{DOMAIN}_living_room_climate"
+        entry_valid.entity_id = "climate.roommind_living_room"
 
         mock_registry = MagicMock()
         mock_registry.entities.values.return_value = [
@@ -112,11 +107,11 @@ class TestCoverageGaps:
         ):
             coordinator.cleanup_orphaned_entities()
 
-        # Cover entities removed (room has no covers), target_temp kept
+        # Cover entities removed (room has no covers), climate kept
         removed_ids = [c.args[0] for c in mock_registry.async_remove.call_args_list]
         assert "switch.roommind_living_room_cover_auto" in removed_ids
         assert "binary_sensor.roommind_living_room_cover_paused" in removed_ids
-        assert "sensor.roommind_living_room_target_temp" not in removed_ids
+        assert "climate.roommind_living_room" not in removed_ids
 
     def test_cleanup_orphaned_entities_no_orphans(self, hass, mock_config_entry):
         """cleanup_orphaned_entities does nothing when all entities are valid."""
@@ -129,8 +124,8 @@ class TestCoverageGaps:
         hass.data = {DOMAIN: {"store": store}}
 
         entry_valid = MagicMock()
-        entry_valid.unique_id = f"{DOMAIN}_living_room_target_temp"
-        entry_valid.entity_id = "sensor.roommind_living_room_target_temp"
+        entry_valid.unique_id = f"{DOMAIN}_living_room_climate"
+        entry_valid.entity_id = "climate.roommind_living_room"
 
         mock_registry = MagicMock()
         mock_registry.entities.values.return_value = [entry_valid]

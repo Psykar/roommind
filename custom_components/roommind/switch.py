@@ -38,8 +38,6 @@ async def async_setup_entry(
 
     rooms = store.get_rooms()
     for area_id, room in rooms.items():
-        entities.append(RoomMindClimateControlSwitch(coordinator, area_id))
-        coordinator._climate_control_switch_areas.add(area_id)
         if room.get("covers"):
             entities.extend(_create_room_switches(coordinator, area_id))
             coordinator._switch_entity_areas.add(area_id)
@@ -77,34 +75,6 @@ class RoomMindCoverAutoSwitch(CoordinatorEntity, SwitchEntity):
         """Disable automatic cover control."""
         store = self.coordinator.hass.data[DOMAIN]["store"]
         await store.async_update_room(self._area_id, {"covers_auto_enabled": False})
-        await self.coordinator.async_request_refresh()
-
-
-class RoomMindClimateControlSwitch(CoordinatorEntity, SwitchEntity):
-    _attr_has_entity_name = True
-
-    def __init__(self, coordinator: RoomMindCoordinator, area_id: str) -> None:
-        super().__init__(coordinator)
-        self._area_id = area_id
-        self._attr_unique_id = f"{DOMAIN}_{area_id}_climate_control"
-        self._attr_name = f"{area_id} Climate Control"
-        self._attr_icon = "mdi:thermostat"
-        self.entity_id = f"switch.{DOMAIN}_{area_id}_climate_control"
-
-    @property
-    def is_on(self) -> bool:
-        store = self.coordinator.hass.data[DOMAIN]["store"]
-        room = store.get_room(self._area_id)
-        return bool(room.get("climate_control_enabled", True)) if room else True
-
-    async def async_turn_on(self, **kwargs: Any) -> None:
-        store = self.coordinator.hass.data[DOMAIN]["store"]
-        await store.async_update_room(self._area_id, {"climate_control_enabled": True})
-        await self.coordinator.async_request_refresh()
-
-    async def async_turn_off(self, **kwargs: Any) -> None:
-        store = self.coordinator.hass.data[DOMAIN]["store"]
-        await store.async_update_room(self._area_id, {"climate_control_enabled": False})
         await self.coordinator.async_request_refresh()
 
 

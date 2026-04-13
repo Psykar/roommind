@@ -173,32 +173,23 @@ class TestRoomMindCoordinator:
 
     @pytest.mark.asyncio
     async def test_async_room_added_creates_entities(self, hass, mock_config_entry):
-        """Test that async_room_added creates 3 sensor entities."""
+        """Test that async_room_added creates the unified climate entity."""
         coordinator = _create_coordinator(hass, mock_config_entry)
         coordinator.async_request_refresh = AsyncMock()
-        mock_add_entities = MagicMock()
-        coordinator.async_add_entities = mock_add_entities
+        mock_add_climate_entities = MagicMock()
+        coordinator.async_add_climate_entities = mock_add_climate_entities
 
         room = {"area_id": "bedroom_abc12345"}
         await coordinator.async_room_added(room)
 
-        # async_add_entities should be called with 3 entities
-        mock_add_entities.assert_called_once()
-        entities = mock_add_entities.call_args[0][0]
-        assert len(entities) == 2
+        mock_add_climate_entities.assert_called_once()
+        entities = mock_add_climate_entities.call_args[0][0]
+        assert len(entities) == 1
 
-        # Verify entity types
-        from custom_components.roommind.sensor import (
-            RoomMindModeSensor,
-            RoomMindTargetTemperatureSensor,
-        )
+        from custom_components.roommind.climate import RoomMindRoomClimate
 
-        assert isinstance(entities[0], RoomMindTargetTemperatureSensor)
-        assert isinstance(entities[1], RoomMindModeSensor)
-
-        # Verify unique IDs
-        assert entities[0]._attr_unique_id == "roommind_bedroom_abc12345_target_temp"
-        assert entities[1]._attr_unique_id == "roommind_bedroom_abc12345_mode"
+        assert isinstance(entities[0], RoomMindRoomClimate)
+        assert entities[0]._attr_unique_id == "roommind_bedroom_abc12345_climate"
 
         coordinator.async_request_refresh.assert_called_once()
 
@@ -219,23 +210,23 @@ class TestRoomMindCoordinator:
         """Calling async_room_added for an existing room must not register entities twice."""
         coordinator = _create_coordinator(hass, mock_config_entry)
         coordinator.async_request_refresh = AsyncMock()
-        mock_add_entities = MagicMock()
-        coordinator.async_add_entities = mock_add_entities
+        mock_add_climate_entities = MagicMock()
+        coordinator.async_add_climate_entities = mock_add_climate_entities
 
         room = {"area_id": "bedroom_abc12345"}
         await coordinator.async_room_added(room)
         await coordinator.async_room_added(room)  # simulates a room update
 
         # Entities should only be registered once
-        mock_add_entities.assert_called_once()
+        mock_add_climate_entities.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_async_room_update_still_refreshes(self, hass, mock_config_entry):
         """Updating an existing room must still trigger a coordinator refresh."""
         coordinator = _create_coordinator(hass, mock_config_entry)
         coordinator.async_request_refresh = AsyncMock()
-        mock_add_entities = MagicMock()
-        coordinator.async_add_entities = mock_add_entities
+        mock_add_climate_entities = MagicMock()
+        coordinator.async_add_climate_entities = mock_add_climate_entities
 
         room = {"area_id": "bedroom_abc12345"}
         await coordinator.async_room_added(room)
@@ -271,17 +262,17 @@ class TestRoomMindCoordinator:
 
         # Create mock entity registry entries for this room
         entity1 = MagicMock()
-        entity1.unique_id = f"roommind_{room_id}_target_temp"
-        entity1.entity_id = f"sensor.{room_id}_target_temp"
+        entity1.unique_id = f"roommind_{room_id}_climate"
+        entity1.entity_id = f"climate.roommind_{room_id}"
 
         entity2 = MagicMock()
-        entity2.unique_id = f"roommind_{room_id}_mode"
-        entity2.entity_id = f"sensor.{room_id}_mode"
+        entity2.unique_id = f"roommind_{room_id}_cover_auto"
+        entity2.entity_id = f"switch.roommind_{room_id}_cover_auto"
 
         # Also include an entity for a different room (should NOT be removed)
         other_entity = MagicMock()
-        other_entity.unique_id = "roommind_other_room_99999_target_temp"
-        other_entity.entity_id = "sensor.other_room_target_temp"
+        other_entity.unique_id = "roommind_other_room_99999_climate"
+        other_entity.entity_id = "climate.roommind_other_room_99999"
 
         mock_registry = MagicMock()
         mock_registry.entities = MagicMock()
@@ -296,9 +287,9 @@ class TestRoomMindCoordinator:
         # Verify only the 2 entities for the removed room were unregistered
         assert mock_registry.async_remove.call_count == 2
         removed_ids = [call.args[0] for call in mock_registry.async_remove.call_args_list]
-        assert f"sensor.{room_id}_target_temp" in removed_ids
-        assert f"sensor.{room_id}_mode" in removed_ids
-        assert "sensor.other_room_target_temp" not in removed_ids
+        assert f"climate.roommind_{room_id}" in removed_ids
+        assert f"switch.roommind_{room_id}_cover_auto" in removed_ids
+        assert "climate.roommind_other_room_99999" not in removed_ids
 
         coordinator.async_request_refresh.assert_called_once()
 

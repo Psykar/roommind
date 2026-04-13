@@ -87,7 +87,9 @@ class RoomMindRoomClimate(CoordinatorEntity, ClimateEntity):
     def __init__(self, coordinator: RoomMindCoordinator, area_id: str) -> None:
         super().__init__(coordinator)
         self._area_id = area_id
-        self._attr_unique_id = f"{DOMAIN}_{area_id}_climate"
+        # Preserve the legacy unique_id so existing entity-registry entries,
+        # history, and automations continue to work across upgrades.
+        self._attr_unique_id = f"{DOMAIN}_{area_id}_override"
         self._attr_name = area_id
         self.entity_id = f"climate.{DOMAIN}_{area_id}"
 

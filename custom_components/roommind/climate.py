@@ -301,11 +301,17 @@ class RoomMindRoomClimate(CoordinatorEntity, ClimateEntity):
         await store.async_update_room(self._area_id, changes)
         await self.coordinator.async_request_refresh()
 
-    async def async_turn_on(self) -> None:
+    async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn room climate control on."""
+        del kwargs
         if self.hvac_mode != HVACMode.OFF:
             return
-        preferred_mode = HVACMode.HEAT_COOL if HVACMode.HEAT_COOL in self.hvac_modes else self.hvac_modes[-1]
+        available_modes = [mode for mode in self.hvac_modes if mode != HVACMode.OFF]
+        if not available_modes:
+            return
+        preferred_mode = (
+            HVACMode.HEAT_COOL if HVACMode.HEAT_COOL in available_modes else available_modes[-1]
+        )
         await self.async_set_hvac_mode(preferred_mode)
 
     async def async_turn_off(self) -> None:

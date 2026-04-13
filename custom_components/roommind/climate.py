@@ -164,9 +164,13 @@ class RoomMindRoomClimate(CoordinatorEntity, ClimateEntity):
 
         has_heat, has_cool = self._room_capabilities()
         climate_mode = room.get("climate_mode", CLIMATE_MODE_AUTO)
-        if climate_mode == CLIMATE_MODE_HEAT_ONLY or (climate_mode == CLIMATE_MODE_AUTO and has_heat and not has_cool):
+        if (climate_mode == CLIMATE_MODE_HEAT_ONLY and has_heat) or (
+            climate_mode == CLIMATE_MODE_AUTO and has_heat and not has_cool
+        ):
             return HVACMode.HEAT
-        if climate_mode == CLIMATE_MODE_COOL_ONLY or (climate_mode == CLIMATE_MODE_AUTO and has_cool and not has_heat):
+        if (climate_mode == CLIMATE_MODE_COOL_ONLY and has_cool) or (
+            climate_mode == CLIMATE_MODE_AUTO and has_cool and not has_heat
+        ):
             return HVACMode.COOL
         if has_heat and has_cool:
             return HVACMode.HEAT_COOL

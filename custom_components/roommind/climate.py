@@ -314,6 +314,6 @@ class RoomMindRoomClimate(CoordinatorEntity, ClimateEntity):
         )
         await self.async_set_hvac_mode(preferred_mode)
 
-    async def async_turn_off(self) -> None:
+    async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn room climate control off."""
         await self.async_set_hvac_mode(HVACMode.OFF)

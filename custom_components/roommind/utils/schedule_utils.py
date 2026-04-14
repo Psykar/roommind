@@ -104,12 +104,22 @@ def resolve_targets_at_time(
     block_temp_converter: Callable[[float], float] | None = None,
     presence_away_action: str = "eco",
     schedule_off_action: str = "eco",
+    override_heat_temp: float | None = None,
+    override_cool_temp: float | None = None,
 ) -> TargetTemps:
     """Resolve dual heat/cool target temps at a specific timestamp.
 
     Returns TargetTemps(heat, cool). None values mean "force off".
     """
-    # 1. Override — single-point target
+    # 1. Override
+    if (override_heat_temp is not None or override_cool_temp is not None) and (
+        override_until is None or ts < override_until
+    ):
+        return TargetTemps(
+            heat=float(override_heat_temp) if override_heat_temp is not None else None,
+            cool=float(override_cool_temp) if override_cool_temp is not None else None,
+        )
+    # Legacy single-point override
     if override_temp is not None and (override_until is None or ts < override_until):
         t = float(override_temp)
         return TargetTemps(heat=t, cool=t)
@@ -257,6 +267,8 @@ def make_target_resolver(
     eco_cool = room.get("eco_cool", DEFAULT_ECO_COOL)
     override_until = room.get("override_until")
     override_temp = room.get("override_temp")
+    override_heat_temp = room.get("override_heat_temp")
+    override_cool_temp = room.get("override_cool_temp")
     vacation_until = settings.get("vacation_until")
     vacation_temp = settings.get("vacation_temp")
     presence_away_action = settings.get("presence_away_action", "eco")
@@ -285,6 +297,8 @@ def make_target_resolver(
             block_temp_converter=converter,
             presence_away_action=presence_away_action,
             schedule_off_action=schedule_off_action,
+            override_heat_temp=override_heat_temp,
+            override_cool_temp=override_cool_temp,
         )
         if targets.heat is None and targets.cool is None:
             return targets

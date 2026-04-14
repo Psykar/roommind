@@ -179,11 +179,18 @@ VACATION_SENTINEL_UNTIL = 32503680000.0
 def build_override_live(room: dict) -> dict:
     """Build override fields for live data from a room config dict."""
     override_temp = room.get("override_temp")
+    override_heat_temp = room.get("override_heat_temp")
+    override_cool_temp = room.get("override_cool_temp")
     override_until = room.get("override_until")
-    active = bool(override_temp is not None and (override_until is None or time.time() < override_until))
+    active = bool(
+        (override_temp is not None or override_heat_temp is not None or override_cool_temp is not None)
+        and (override_until is None or time.time() < override_until)
+    )
     return {
         "override_active": active,
         "override_type": room.get("override_type") if active else None,
         "override_temp": override_temp if active else None,
+        "override_heat_temp": override_heat_temp if active else None,
+        "override_cool_temp": override_cool_temp if active else None,
         "override_until": override_until if active else None,
     }

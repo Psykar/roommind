@@ -454,6 +454,8 @@ async def websocket_override_set(
         area_id,
         {
             "override_temp": override_temp,
+            "override_heat_temp": None,
+            "override_cool_temp": None,
             "override_until": override_until,
             "override_type": override_type,
         },
@@ -496,6 +498,8 @@ async def websocket_override_clear(
         area_id,
         {
             "override_temp": None,
+            "override_heat_temp": None,
+            "override_cool_temp": None,
             "override_until": None,
             "override_type": None,
         },

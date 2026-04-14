@@ -534,6 +534,8 @@ async def test_override_clear(ws_hass, store, connection):
     connection.send_result.assert_called_once_with(4, {"success": True})
     room = store.get_room("bath")
     assert room.get("override_temp") is None
+    assert room.get("override_heat_temp") is None
+    assert room.get("override_cool_temp") is None
     assert room.get("override_until") is None
     assert room.get("override_type") is None
 
@@ -542,6 +544,7 @@ async def test_override_clear(ws_hass, store, connection):
 async def test_override_set_without_duration_permanent(ws_hass, store, connection):
     """Setting override without duration creates a permanent override."""
     await store.async_load()
+    await store.async_save_room("perm", {"override_heat_temp": 19.0, "override_cool_temp": 24.0})
 
     save_msg = {
         "id": 2,
@@ -565,6 +568,8 @@ async def test_override_set_without_duration_permanent(ws_hass, store, connectio
     connection.send_result.assert_called_once_with(3, {"success": True})
     room = store.get_room("perm")
     assert room["override_temp"] == 24.0
+    assert room["override_heat_temp"] is None
+    assert room["override_cool_temp"] is None
     assert room["override_until"] is None
     assert room["override_type"] == "custom"
 
@@ -1722,7 +1727,9 @@ def test_save_room_cover_deploy_threshold_rejects_negative():
 @pytest.mark.parametrize(
     "field,value",
     [
+        ("thermostats", ["climate.roommind_living_room"]),
         ("thermostats", ["climate.roommind_living_room_override"]),
+        ("acs", ["climate.roommind_living_room"]),
         ("acs", ["climate.roommind_living_room_override"]),
         ("temperature_sensor", "sensor.roommind_living_room_target_temp"),
         ("humidity_sensor", "sensor.roommind_living_room_mode"),

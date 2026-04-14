@@ -88,6 +88,31 @@ class TestRoomMindCoordinator:
         assert room_state["override_active"] is True
         assert room_state["override_type"] == "custom"
 
+    @pytest.mark.asyncio
+    async def test_split_override_sets_heat_and_cool_targets(self, hass, mock_config_entry):
+        """Split overrides drive live targets and still count as active overrides."""
+        room_with_override = {
+            **SAMPLE_ROOM,
+            "override_heat_temp": 20.0,
+            "override_cool_temp": 24.0,
+            "override_until": time.time() + 3600,
+            "override_type": "custom",
+        }
+        store = _make_store_mock({"living_room_abc12345": room_with_override})
+        hass.data = {"roommind": {"store": store}}
+
+        hass.states.get = MagicMock(side_effect=make_mock_states_get())
+        hass.services.async_call = AsyncMock()
+
+        coordinator = _create_coordinator(hass, mock_config_entry)
+        data = await coordinator._async_update_data()
+
+        room_state = data["rooms"]["living_room_abc12345"]
+        assert room_state["target_temp"] == 20.0
+        assert room_state["heat_target"] == 20.0
+        assert room_state["cool_target"] == 24.0
+        assert room_state["override_active"] is True
+
 
 class TestVacationMode:
     """Tests for vacation mode target temperature override."""

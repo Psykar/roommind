@@ -708,9 +708,11 @@ class RoomMindCoordinator(DataUpdateCoordinator):
             power_fraction = 0.0
 
         # --- Cover/blind automatic control ---
-        has_override = room.get("override_temp") is not None and (
-            room.get("override_until") is None or room.get("override_until", 0) > time.time()
-        )
+        has_override = (
+            room.get("override_temp") is not None
+            or room.get("override_heat_temp") is not None
+            or room.get("override_cool_temp") is not None
+        ) and (room.get("override_until") is None or room.get("override_until", 0) > time.time())
         cover_result = await self._cover_orchestrator.async_process(
             area_id=area_id,
             room=room,
@@ -1209,9 +1211,31 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         """
         from .utils.schedule_utils import find_active_block
 
+        override_until = room.get("override_until")
+        override_heat = room.get("override_heat_temp")
+        override_cool = room.get("override_cool_temp")
+        if override_heat is not None or override_cool is not None:
+            if override_until is None or time.time() < override_until:
+                return TargetTemps(
+                    heat=float(override_heat) if override_heat is not None else None,
+                    cool=float(override_cool) if override_cool is not None else None,
+                )
+            area_id = room.get("area_id", "unknown")
+            store = self.hass.data[DOMAIN]["store"]
+            self.hass.async_create_task(
+                store.async_update_room(
+                    area_id,
+                    {
+                        "override_heat_temp": None,
+                        "override_cool_temp": None,
+                        "override_until": None,
+                        "override_type": None,
+                    },
+                )
+            )
+
         # 1. Override — single-point target
         override_temp = room.get("override_temp")
-        override_until = room.get("override_until")
         if override_temp is not None:
             if override_until is None or time.time() < override_until:
                 t = float(override_temp)
@@ -1225,6 +1249,8 @@ class RoomMindCoordinator(DataUpdateCoordinator):
                         area_id,
                         {
                             "override_temp": None,
+                            "override_heat_temp": None,
+                            "override_cool_temp": None,
                             "override_until": None,
                             "override_type": None,
                         },
@@ -1328,7 +1354,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
             self.async_add_entities(entities)
             self._entity_areas.add(area_id)
 
-        # Climate entities (override control): always create
+        # Climate entities: always create
         if (
             area_id not in self._climate_entity_areas
             and hasattr(self, "async_add_climate_entities")
@@ -1423,7 +1449,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         registry = er.async_get(self.hass)
 
         # Known valid suffixes for each condition
-        always_valid = ("_target_temp", "_mode", "_override", "_climate_control")
+        always_valid = ("_target_temp", "_mode", "_override", "_climate", "_climate_control")
         cover_only = ("_cover_auto", "_cover_paused")
         # Global entities (not per-room) that should never be cleaned up
         global_uids = {f"{DOMAIN}_vacation"}

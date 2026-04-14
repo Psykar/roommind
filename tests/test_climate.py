@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from homeassistant.components.climate import HVACAction, HVACMode
 
+from custom_components.roommind import climate as climate_module
 from custom_components.roommind.climate import (
     RoomMindRoomClimate,
     _create_room_climates,
@@ -50,6 +51,16 @@ def test_room_climate_unique_id_and_entity_id(mock_coordinator):
     entity = RoomMindRoomClimate(coordinator, "living_room")
     assert entity.unique_id == "roommind_living_room_climate"
     assert entity.entity_id == "climate.roommind_living_room"
+
+
+def test_room_climate_name_uses_area_registry_name(mock_coordinator, monkeypatch):
+    """Room climate entity name prefers the Home Assistant area name."""
+    coordinator, _ = mock_coordinator
+    monkeypatch.setattr(climate_module, "get_area_name", lambda hass, area_id: "Living Room")
+
+    entity = RoomMindRoomClimate(coordinator, "living_room")
+
+    assert entity.name == "Living Room Climate"
 
 
 def test_room_climate_hvac_modes_include_heat_cool_for_mixed_room(mock_coordinator):

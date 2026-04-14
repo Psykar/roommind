@@ -32,6 +32,7 @@ from .const import (
 from .control.mpc_controller import check_acs_can_heat
 from .coordinator import RoomMindCoordinator
 from .utils.device_utils import get_ac_eids, get_trv_eids
+from .utils.entity_naming import get_area_name
 from .utils.schedule_utils import get_active_schedule_entity
 
 
@@ -120,7 +121,7 @@ class RoomMindRoomClimate(_RoomMindBaseClimate):
     def __init__(self, coordinator: RoomMindCoordinator, area_id: str) -> None:
         super().__init__(coordinator, area_id)
         self._attr_unique_id = f"{DOMAIN}_{area_id}_climate"
-        self._attr_name = f"{area_id} Climate"
+        self._attr_name = f"{get_area_name(coordinator.hass, area_id)} Climate"
         self.entity_id = f"climate.{DOMAIN}_{area_id}"
 
     def _room_capabilities(self) -> tuple[bool, bool]:

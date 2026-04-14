@@ -9,7 +9,6 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import (
@@ -65,23 +64,13 @@ from .utils.device_utils import (
     get_direct_setpoint_eids,
     get_trv_eids,
 )
+from .utils.entity_naming import get_area_name
 from .utils.history_store import HistoryStore
 from .utils.schedule_utils import resolve_schedule_index
 from .utils.sensor_utils import read_sensor_value
 from .utils.temp_utils import celsius_delta_to_ha, ha_temp_to_celsius, ha_temp_unit_str
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def _get_area_name(hass: HomeAssistant, area_id: str) -> str:
-    """Get human-readable area name from area registry."""
-    try:
-        area_reg = ar.async_get(hass)
-        area = area_reg.async_get_area(area_id)
-        return area.name if area else area_id
-    except Exception:  # noqa: BLE001
-        return area_id
-
 
 class RoomMindCoordinator(DataUpdateCoordinator):
     """Central coordinator for RoomMind room data and state."""
@@ -378,7 +367,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         """
         mold = await self._mold_manager.evaluate(
             area_id,
-            _get_area_name(self.hass, area_id),
+            get_area_name(self.hass, area_id),
             current_temp,
             current_humidity,
             self.outdoor_temp,

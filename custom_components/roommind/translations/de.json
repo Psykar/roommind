@@ -1,4 +1,20 @@
 {
+  "entity": {
+    "climate": {
+      "room_climate": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "comfort": "Komfort",
+              "eco": "Eco",
+              "override": "Manuell",
+              "schedule": "Zeitplan"
+            }
+          }
+        }
+      }
+    }
+  },
   "config": {
     "step": {
       "user": {

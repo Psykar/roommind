@@ -200,14 +200,22 @@ export class RsRoomDetail extends LitElement {
       this._initFromConfig();
       this._prevAreaId = currentAreaId;
     } else if (changedProps.has("config") && !this._dirty) {
-      const prevConfig = changedProps.get("config") as RoomConfig | null | undefined;
-      if (prevConfig === null || prevConfig === undefined) {
-        this._initFromConfig();
-      }
+      this._initFromConfig({ preserveEditingState: true });
     }
   }
 
-  private _initFromConfig() {
+  private _initFromConfig(options?: { preserveEditingState?: boolean }) {
+    const preserveEditingState = options?.preserveEditingState ?? false;
+    const editingState = preserveEditingState
+      ? {
+          schedule: this._editingSchedule,
+          devices: this._editingDevices,
+          sensors: this._editingSensors,
+          windows: this._editingWindows,
+          covers: this._editingCovers,
+        }
+      : null;
+
     if (this.config) {
       if (this.config.devices?.length) {
         this._devices = [...this.config.devices];
@@ -303,11 +311,19 @@ export class RsRoomDetail extends LitElement {
     // Unconfigured rooms open all panels in edit mode (setup flow).
     // Configured rooms open all panels in display mode (user clicks pen to edit).
     const isConfigured = this._devices.length > 0;
-    this._editingSchedule = !isConfigured;
-    this._editingDevices = !isConfigured;
-    this._editingSensors = !isConfigured;
-    this._editingWindows = !isConfigured;
-    this._editingCovers = !isConfigured;
+    if (editingState) {
+      this._editingSchedule = editingState.schedule;
+      this._editingDevices = editingState.devices;
+      this._editingSensors = editingState.sensors;
+      this._editingWindows = editingState.windows;
+      this._editingCovers = editingState.covers;
+    } else {
+      this._editingSchedule = !isConfigured;
+      this._editingDevices = !isConfigured;
+      this._editingSensors = !isConfigured;
+      this._editingWindows = !isConfigured;
+      this._editingCovers = !isConfigured;
+    }
   }
 
   /** Expose effective override for hero-status via the override sub-component. */

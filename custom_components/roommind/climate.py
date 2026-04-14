@@ -24,6 +24,8 @@ from .const import (
     DEFAULT_COMFORT_COOL,
     DEFAULT_COMFORT_HEAT,
     DEFAULT_COMFORT_TEMP,
+    DEFAULT_ECO_COOL,
+    DEFAULT_ECO_HEAT,
     DOMAIN,
     MODE_COOLING,
     MODE_HEATING,
@@ -34,6 +36,11 @@ from .coordinator import RoomMindCoordinator
 from .utils.device_utils import get_ac_eids, get_trv_eids
 from .utils.entity_naming import get_area_name
 from .utils.schedule_utils import get_active_schedule_entity
+
+PRESET_COMFORT = "comfort"
+PRESET_ECO = "eco"
+PRESET_OVERRIDE = "override"
+PRESET_SCHEDULE = "schedule"
 
 
 def _create_room_climates(
@@ -122,15 +129,16 @@ class RoomMindRoomClimate(_RoomMindBaseClimate):
         super().__init__(coordinator, area_id)
         self._attr_unique_id = f"{DOMAIN}_{area_id}_climate"
         self._attr_name = f"{get_area_name(coordinator.hass, area_id)} Climate"
+        self._attr_translation_key = "room_climate"
         self.entity_id = f"climate.{DOMAIN}_{area_id}"
 
-    def _room_capabilities(self) -> tuple[bool, bool]:
+    def _room_capabilities(self, room: dict | None = None) -> tuple[bool, bool]:
         """Return whether the room can heat and/or cool."""
-        room = self._get_room() or {}
+        room = room or self._get_room() or {}
         devices = room.get("devices", [])
         has_heat = bool(get_trv_eids(devices) or room.get("thermostats", []))
         has_cool = bool(get_ac_eids(devices) or room.get("acs", []))
-        if devices and check_acs_can_heat(self.hass, room):
+        if devices and check_acs_can_heat(self.coordinator.hass, room):
             has_heat = True
 
         climate_mode = room.get("climate_mode", CLIMATE_MODE_AUTO)
@@ -140,10 +148,113 @@ class RoomMindRoomClimate(_RoomMindBaseClimate):
             has_heat = False
         return has_heat, has_cool
 
-    def _supports_target_range(self) -> bool:
+    def _supports_target_range(self, room: dict | None = None) -> bool:
         """Return True when the room should expose heat/cool targets."""
-        has_heat, has_cool = self._room_capabilities()
+        has_heat, has_cool = self._room_capabilities(room)
         return has_heat and has_cool
+
+    def _has_schedule(self, room: dict | None = None) -> bool:
+        """Return True when the room has at least one schedule configured."""
+        room = room or self._get_room() or {}
+        return bool(room.get("schedules"))
+
+    def _preset_mode_from_room(self, room: dict | None = None) -> str | None:
+        """Map the current RoomMind state to a Home Assistant preset mode."""
+        room = room or self._get_room()
+        if not room:
+            return None
+        if self._is_override_active():
+            override_type = room.get("override_type")
+            if override_type == "boost":
+                return PRESET_COMFORT
+            if override_type == "eco":
+                return PRESET_ECO
+            if override_type == OVERRIDE_CUSTOM:
+                return PRESET_OVERRIDE
+        if self._has_schedule(room):
+            return PRESET_SCHEDULE
+        return None
+
+    def _custom_override_payload(
+        self,
+        *,
+        temperature: float | None = None,
+        low: float | None = None,
+        high: float | None = None,
+    ) -> dict[str, float | None | str]:
+        """Build the store payload for a custom override."""
+        if low is not None or high is not None:
+            if low is None or high is None:
+                raise ValueError("Both low and high targets are required for a range override")
+            if low > high:
+                low, high = high, low
+            return {
+                "override_temp": None,
+                "override_heat_temp": low,
+                "override_cool_temp": high,
+                "override_until": None,
+                "override_type": OVERRIDE_CUSTOM,
+            }
+        if temperature is None:
+            raise ValueError("Temperature is required for a single-point override")
+        return {
+            "override_temp": temperature,
+            "override_heat_temp": None,
+            "override_cool_temp": None,
+            "override_until": None,
+            "override_type": OVERRIDE_CUSTOM,
+        }
+
+    def _preset_override_payload(self, preset_mode: str, room: dict | None = None) -> dict[str, float | None | str]:
+        """Build the store payload for a preset selection."""
+        room = room or self._get_room() or {}
+        if preset_mode == PRESET_SCHEDULE:
+            return {
+                "override_temp": None,
+                "override_heat_temp": None,
+                "override_cool_temp": None,
+                "override_until": None,
+                "override_type": None,
+            }
+
+        if preset_mode == PRESET_OVERRIDE:
+            if self._supports_target_range(room):
+                low = self.target_temperature_low
+                high = self.target_temperature_high
+                if low is None or high is None:
+                    raise ValueError("Range targets are unavailable for override preset")
+                return self._custom_override_payload(low=low, high=high)
+            return self._custom_override_payload(temperature=self.target_temperature)
+
+        if preset_mode == PRESET_COMFORT:
+            heat_target = room.get("comfort_heat", room.get("comfort_temp", DEFAULT_COMFORT_HEAT))
+            cool_target = room.get("comfort_cool", DEFAULT_COMFORT_COOL)
+            override_type = "boost"
+        elif preset_mode == PRESET_ECO:
+            heat_target = room.get("eco_heat", room.get("eco_temp", DEFAULT_ECO_HEAT))
+            cool_target = room.get("eco_cool", DEFAULT_ECO_COOL)
+            override_type = "eco"
+        else:
+            raise ValueError(f"Unsupported preset mode: {preset_mode}")
+
+        if self._supports_target_range(room):
+            return {
+                "override_temp": None,
+                "override_heat_temp": float(heat_target),
+                "override_cool_temp": float(cool_target),
+                "override_until": None,
+                "override_type": override_type,
+            }
+
+        has_heat, has_cool = self._room_capabilities(room)
+        target = cool_target if has_cool and not has_heat else heat_target
+        return {
+            "override_temp": float(target),
+            "override_heat_temp": None,
+            "override_cool_temp": None,
+            "override_until": None,
+            "override_type": override_type,
+        }
 
     def _resolved_targets_fallback(self) -> tuple[float | None, float | None]:
         """Resolve current room targets from config when live data is absent."""
@@ -152,7 +263,7 @@ class RoomMindRoomClimate(_RoomMindBaseClimate):
             return None, None
         store = self.coordinator.hass.data[DOMAIN]["store"]
         settings = store.get_settings()
-        schedule_entity_id = get_active_schedule_entity(self.hass, room)
+        schedule_entity_id = get_active_schedule_entity(self.coordinator.hass, room)
         targets = self.coordinator._resolve_target_temps(  # noqa: SLF001 - shared integration helper
             room,
             settings,
@@ -177,12 +288,29 @@ class RoomMindRoomClimate(_RoomMindBaseClimate):
     @property
     def supported_features(self) -> ClimateEntityFeature:
         """Return supported features for this room climate."""
-        features = ClimateEntityFeature.TURN_ON | ClimateEntityFeature.TURN_OFF
+        features = (
+            ClimateEntityFeature.TURN_ON
+            | ClimateEntityFeature.TURN_OFF
+            | ClimateEntityFeature.PRESET_MODE
+        )
         if self._supports_target_range():
             features |= ClimateEntityFeature.TARGET_TEMPERATURE_RANGE
         else:
             features |= ClimateEntityFeature.TARGET_TEMPERATURE
         return features
+
+    @property
+    def preset_modes(self) -> list[str]:
+        """Return supported preset modes for this room climate."""
+        modes = [PRESET_COMFORT, PRESET_ECO, PRESET_OVERRIDE]
+        if self._has_schedule():
+            modes.append(PRESET_SCHEDULE)
+        return modes
+
+    @property
+    def preset_mode(self) -> str | None:
+        """Return the current preset mode."""
+        return self._preset_mode_from_room()
 
     @property
     def hvac_mode(self) -> HVACMode:
@@ -287,6 +415,7 @@ class RoomMindRoomClimate(_RoomMindBaseClimate):
     async def async_set_temperature(self, **kwargs: Any) -> None:
         """Set a custom room target override."""
         store = self.coordinator.hass.data[DOMAIN]["store"]
+        active_preset = self.preset_mode
 
         target_temp_low = kwargs.get("target_temp_low")
         target_temp_high = kwargs.get("target_temp_high")
@@ -295,34 +424,54 @@ class RoomMindRoomClimate(_RoomMindBaseClimate):
             high = float(target_temp_high) if target_temp_high is not None else self.target_temperature_high
             if low is None or high is None:
                 return
-            if low > high:
-                low, high = high, low
-            await store.async_update_room(
-                self._area_id,
-                {
-                    "override_temp": None,
-                    "override_heat_temp": low,
-                    "override_cool_temp": high,
-                    "override_until": None,
-                    "override_type": OVERRIDE_CUSTOM,
-                },
-            )
+            if active_preset == PRESET_COMFORT:
+                room = await store.async_save_room(
+                    self._area_id,
+                    {"comfort_heat": low, "comfort_cool": high},
+                )
+                await store.async_update_room(self._area_id, self._preset_override_payload(PRESET_COMFORT, room))
+            elif active_preset == PRESET_ECO:
+                room = await store.async_save_room(
+                    self._area_id,
+                    {"eco_heat": low, "eco_cool": high},
+                )
+                await store.async_update_room(self._area_id, self._preset_override_payload(PRESET_ECO, room))
+            else:
+                await store.async_update_room(
+                    self._area_id,
+                    self._custom_override_payload(low=low, high=high),
+                )
             await self.coordinator.async_request_refresh()
             return
 
         temperature = kwargs.get("temperature")
         if temperature is None:
             return
-        await store.async_update_room(
-            self._area_id,
-            {
-                "override_temp": temperature,
-                "override_heat_temp": None,
-                "override_cool_temp": None,
-                "override_until": None,
-                "override_type": OVERRIDE_CUSTOM,
-            },
-        )
+        if active_preset == PRESET_COMFORT:
+            room = self._get_room() or {}
+            has_heat, has_cool = self._room_capabilities(room)
+            changes = {"comfort_cool": temperature} if has_cool and not has_heat else {"comfort_heat": temperature}
+            room = await store.async_save_room(self._area_id, changes)
+            await store.async_update_room(self._area_id, self._preset_override_payload(PRESET_COMFORT, room))
+        elif active_preset == PRESET_ECO:
+            room = self._get_room() or {}
+            has_heat, has_cool = self._room_capabilities(room)
+            changes = {"eco_cool": temperature} if has_cool and not has_heat else {"eco_heat": temperature}
+            room = await store.async_save_room(self._area_id, changes)
+            await store.async_update_room(self._area_id, self._preset_override_payload(PRESET_ECO, room))
+        else:
+            await store.async_update_room(
+                self._area_id,
+                self._custom_override_payload(temperature=float(temperature)),
+            )
+        await self.coordinator.async_request_refresh()
+
+    async def async_set_preset_mode(self, preset_mode: str) -> None:
+        """Set the active climate preset mode."""
+        if preset_mode not in self.preset_modes:
+            raise ValueError(f"Unsupported preset mode: {preset_mode}")
+        store = self.coordinator.hass.data[DOMAIN]["store"]
+        await store.async_update_room(self._area_id, self._preset_override_payload(preset_mode))
         await self.coordinator.async_request_refresh()
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:

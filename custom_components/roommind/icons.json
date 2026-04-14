@@ -1,0 +1,18 @@
+{
+  "entity": {
+    "climate": {
+      "room_climate": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "comfort": "mdi:sofa",
+              "eco": "mdi:leaf",
+              "override": "mdi:tune-variant",
+              "schedule": "mdi:calendar-clock"
+            }
+          }
+        }
+      }
+    }
+  }
+}

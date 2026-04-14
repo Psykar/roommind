@@ -193,6 +193,53 @@ async def test_list_rooms_after_save(ws_hass, store, connection):
 
 
 @pytest.mark.asyncio
+async def test_list_rooms_reflects_updated_schedule_temperatures(ws_hass, store, connection):
+    """list_rooms returns the latest comfort/eco temps after external store updates."""
+    await store.async_load()
+
+    save_msg = {
+        "id": 2,
+        "type": "roommind/rooms/save",
+        "area_id": "living_room",
+        "thermostats": ["climate.living_room_trv"],
+        "climate_mode": "auto",
+        "comfort_heat": 21.0,
+        "comfort_cool": 24.0,
+        "eco_heat": 17.0,
+        "eco_cool": 27.0,
+        "schedules": [{"entity_id": "schedule.living_room"}],
+    }
+    await _save_room(ws_hass, connection, save_msg)
+    connection.send_result.reset_mock()
+
+    # Simulate a climate entity editing the stored comfort/eco preset values.
+    await store.async_save_room(
+        "living_room",
+        {
+            "comfort_heat": 20.0,
+            "comfort_cool": 25.0,
+            "eco_heat": 16.5,
+            "eco_cool": 26.5,
+        },
+    )
+
+    mock_coordinator = MagicMock()
+    mock_coordinator.rooms = {}
+    mock_coordinator.async_request_refresh = AsyncMock()
+    ws_hass.data[DOMAIN]["coordinator"] = mock_coordinator
+
+    list_msg = {"id": 3, "type": "roommind/rooms/list"}
+    await _list_rooms(ws_hass, connection, list_msg)
+
+    rooms = connection.send_result.call_args[0][1]["rooms"]
+    room = rooms["living_room"]
+    assert room["comfort_heat"] == 20.0
+    assert room["comfort_cool"] == 25.0
+    assert room["eco_heat"] == 16.5
+    assert room["eco_cool"] == 26.5
+
+
+@pytest.mark.asyncio
 async def test_save_room_display_name_roundtrip(ws_hass, store, connection):
     """display_name is persisted through save and returned in list."""
     await store.async_load()

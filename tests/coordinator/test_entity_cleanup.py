@@ -132,8 +132,12 @@ class TestCoverageGaps:
         entry_valid.unique_id = f"{DOMAIN}_living_room_target_temp"
         entry_valid.entity_id = "sensor.roommind_living_room_target_temp"
 
+        entry_valid_climate = MagicMock()
+        entry_valid_climate.unique_id = f"{DOMAIN}_living_room_climate"
+        entry_valid_climate.entity_id = "climate.roommind_living_room"
+
         mock_registry = MagicMock()
-        mock_registry.entities.values.return_value = [entry_valid]
+        mock_registry.entities.values.return_value = [entry_valid, entry_valid_climate]
 
         with patch(
             "homeassistant.helpers.entity_registry.async_get",

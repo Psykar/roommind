@@ -151,6 +151,20 @@ def test_room_climate_hvac_mode_off_when_disabled(mock_coordinator):
     assert entity.hvac_action == HVACAction.OFF
 
 
+def test_room_climate_pending_state_marks_entity_assumed(mock_coordinator):
+    """Pending optimistic state is surfaced via assumed_state and extra attrs."""
+    coordinator, store = mock_coordinator
+    store.get_room.return_value = _mixed_room()
+    entity = RoomMindRoomClimate(coordinator, "living_room")
+
+    entity._set_pending_state(hvac_mode=HVACMode.OFF)
+
+    assert entity.assumed_state is True
+    assert entity.extra_state_attributes is not None
+    assert entity.extra_state_attributes["pending_update"] is True
+    assert entity.hvac_mode == HVACMode.OFF
+
+
 def test_room_climate_uses_live_targets(mock_coordinator):
     """Room climate prefers live targets from coordinator data."""
     coordinator, store = mock_coordinator
@@ -179,6 +193,21 @@ def test_room_climate_uses_live_targets(mock_coordinator):
     assert entity.target_temperature_high == 24.5
     assert entity.current_temperature == 20.5
     assert entity.hvac_action == HVACAction.HEATING
+
+
+def test_room_climate_coordinator_update_clears_pending_state(mock_coordinator):
+    """Coordinator refresh confirmation clears the optimistic pending state."""
+    coordinator, store = mock_coordinator
+    store.get_room.return_value = _mixed_room()
+    entity = RoomMindRoomClimate(coordinator, "living_room")
+    entity.async_write_ha_state = MagicMock()
+
+    entity._set_pending_state(preset_mode=PRESET_OVERRIDE)
+    entity._handle_coordinator_update()
+
+    assert entity.assumed_state is False
+    assert entity.extra_state_attributes is None
+    entity.async_write_ha_state.assert_called_once()
 
 
 def test_room_climate_preset_modes_include_schedule_only_when_scheduled(mock_coordinator):
@@ -275,6 +304,10 @@ async def test_room_climate_set_preset_mode_comfort(mock_coordinator):
         },
     )
     coordinator.async_request_refresh.assert_awaited_once()
+    assert entity.preset_mode == PRESET_COMFORT
+    assert entity.target_temperature_low == 21.0
+    assert entity.target_temperature_high == 24.0
+    assert entity.assumed_state is True
 
 
 @pytest.mark.asyncio
@@ -480,6 +513,8 @@ async def test_room_climate_set_hvac_mode_updates_room_mode(mock_coordinator):
         "living_room",
         {"climate_control_enabled": True, "climate_mode": CLIMATE_MODE_AUTO},
     )
+    assert entity.hvac_mode == HVACMode.HEAT_COOL
+    assert entity.assumed_state is True
 
 @pytest.mark.asyncio
 async def test_async_setup_entry_creates_entities_for_all_rooms():

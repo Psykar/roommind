@@ -40,10 +40,7 @@ def _create_room_climates(
     area_id: str,
 ) -> list[ClimateEntity]:
     """Create climate entities for a room."""
-    return [
-        RoomMindRoomClimate(coordinator, area_id),
-        RoomMindOverrideClimate(coordinator, area_id),
-    ]
+    return [RoomMindRoomClimate(coordinator, area_id)]
 
 
 async def async_setup_entry(
@@ -373,90 +370,3 @@ class RoomMindRoomClimate(_RoomMindBaseClimate):
         """Turn room climate control off."""
         del kwargs
         await self.async_set_hvac_mode(HVACMode.OFF)
-
-
-class RoomMindOverrideClimate(_RoomMindBaseClimate):
-    """Climate entity for room override control."""
-
-    _attr_icon = "mdi:thermometer-alert"
-    _attr_hvac_modes = [HVACMode.OFF, HVACMode.AUTO]
-    _attr_supported_features = (
-        ClimateEntityFeature.TARGET_TEMPERATURE | ClimateEntityFeature.TURN_ON | ClimateEntityFeature.TURN_OFF
-    )
-
-    def __init__(self, coordinator: RoomMindCoordinator, area_id: str) -> None:
-        super().__init__(coordinator, area_id)
-        self._attr_unique_id = f"{DOMAIN}_{area_id}_override"
-        self._attr_name = f"{area_id} Override"
-        self.entity_id = f"climate.{DOMAIN}_{area_id}_override"
-
-    @property
-    def hvac_mode(self) -> HVACMode:
-        """Return AUTO if override is active, OFF otherwise."""
-        return HVACMode.AUTO if self._is_override_active() else HVACMode.OFF
-
-    @property
-    def target_temperature(self) -> float:
-        """Return override temp if active, else DEFAULT_COMFORT_TEMP."""
-        if self._is_override_active():
-            heat_target, cool_target = self._override_targets()
-            if heat_target is not None:
-                return heat_target
-            if cool_target is not None:
-                return cool_target
-        return DEFAULT_COMFORT_TEMP
-
-    @property
-    def current_temperature(self) -> float | None:
-        """Return the room's current temperature from coordinator data."""
-        room_data = self._get_live_room()
-        if not room_data:
-            return None
-        val = room_data.get("current_temp")
-        return float(val) if isinstance(val, (int, float)) else None
-
-    async def async_set_temperature(self, **kwargs: Any) -> None:
-        """Set override temperature."""
-        temperature = kwargs.get("temperature")
-        if temperature is None:
-            return
-        store = self.coordinator.hass.data[DOMAIN]["store"]
-        await store.async_update_room(
-            self._area_id,
-            {
-                "override_temp": temperature,
-                "override_heat_temp": None,
-                "override_cool_temp": None,
-                "override_until": None,
-                "override_type": OVERRIDE_CUSTOM,
-            },
-        )
-        await self.coordinator.async_request_refresh()
-
-    async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
-        """Set HVAC mode: OFF clears override, AUTO activates."""
-        store = self.coordinator.hass.data[DOMAIN]["store"]
-        if hvac_mode == HVACMode.OFF:
-            await store.async_update_room(
-                self._area_id,
-                {
-                    "override_temp": None,
-                    "override_heat_temp": None,
-                    "override_cool_temp": None,
-                    "override_until": None,
-                    "override_type": None,
-                },
-            )
-        elif hvac_mode == HVACMode.AUTO:
-            if not self._is_override_active():
-                await store.async_update_room(
-                    self._area_id,
-                    {
-                        "override_temp": DEFAULT_COMFORT_TEMP,
-                        "override_heat_temp": None,
-                        "override_cool_temp": None,
-                        "override_until": None,
-                        "override_type": OVERRIDE_CUSTOM,
-                    },
-                )
-        await self.coordinator.async_request_refresh()

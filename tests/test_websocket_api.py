@@ -1728,9 +1728,7 @@ def test_save_room_cover_deploy_threshold_rejects_negative():
     "field,value",
     [
         ("thermostats", ["climate.roommind_living_room"]),
-        ("thermostats", ["climate.roommind_living_room_override"]),
         ("acs", ["climate.roommind_living_room"]),
-        ("acs", ["climate.roommind_living_room_override"]),
         ("temperature_sensor", "sensor.roommind_living_room_target_temp"),
         ("humidity_sensor", "sensor.roommind_living_room_mode"),
         ("window_sensors", ["binary_sensor.roommind_test"]),

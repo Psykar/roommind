@@ -9,7 +9,6 @@ import pytest
 from homeassistant.components.climate import HVACAction, HVACMode
 
 from custom_components.roommind.climate import (
-    RoomMindOverrideClimate,
     RoomMindRoomClimate,
     _create_room_climates,
     async_setup_entry,
@@ -38,12 +37,11 @@ def mock_coordinator():
 
 
 def test_create_room_climates(mock_coordinator):
-    """Factory creates the room climate plus the legacy override climate."""
+    """Factory creates the room climate entity."""
     coordinator, _ = mock_coordinator
     climates = _create_room_climates(coordinator, "living_room")
-    assert len(climates) == 2
+    assert len(climates) == 1
     assert isinstance(climates[0], RoomMindRoomClimate)
-    assert isinstance(climates[1], RoomMindOverrideClimate)
 
 
 def test_room_climate_unique_id_and_entity_id(mock_coordinator):
@@ -52,14 +50,6 @@ def test_room_climate_unique_id_and_entity_id(mock_coordinator):
     entity = RoomMindRoomClimate(coordinator, "living_room")
     assert entity.unique_id == "roommind_living_room_climate"
     assert entity.entity_id == "climate.roommind_living_room"
-
-
-def test_override_unique_id_and_entity_id(mock_coordinator):
-    """Override climate keeps its legacy ids."""
-    coordinator, _ = mock_coordinator
-    entity = RoomMindOverrideClimate(coordinator, "living_room")
-    assert entity.unique_id == "roommind_living_room_override"
-    assert entity.entity_id == "climate.roommind_living_room_override"
 
 
 def test_room_climate_hvac_modes_include_heat_cool_for_mixed_room(mock_coordinator):
@@ -214,64 +204,9 @@ async def test_room_climate_set_hvac_mode_updates_room_mode(mock_coordinator):
         {"climate_control_enabled": True, "climate_mode": CLIMATE_MODE_AUTO},
     )
 
-
-def test_override_hvac_mode_auto_when_split_override_active(mock_coordinator):
-    """Legacy override climate still treats split overrides as active."""
-    coordinator, store = mock_coordinator
-    store.get_room.return_value = {
-        "override_heat_temp": 20.0,
-        "override_cool_temp": 24.0,
-        "override_until": None,
-        "override_type": "custom",
-    }
-    entity = RoomMindOverrideClimate(coordinator, "living_room")
-    assert entity.hvac_mode == HVACMode.AUTO
-    assert entity.target_temperature == 20.0
-
-
-@pytest.mark.asyncio
-async def test_override_set_temperature_clears_split_fields(mock_coordinator):
-    """Legacy override entity overwrites split overrides cleanly."""
-    coordinator, store = mock_coordinator
-    store.async_update_room = AsyncMock()
-    entity = RoomMindOverrideClimate(coordinator, "living_room")
-    await entity.async_set_temperature(temperature=22.0)
-    store.async_update_room.assert_awaited_once_with(
-        "living_room",
-        {
-            "override_temp": 22.0,
-            "override_heat_temp": None,
-            "override_cool_temp": None,
-            "override_until": None,
-            "override_type": OVERRIDE_CUSTOM,
-        },
-    )
-    coordinator.async_request_refresh.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_override_set_hvac_mode_off_clears_split_fields(mock_coordinator):
-    """Turning the legacy override climate off clears all override forms."""
-    coordinator, store = mock_coordinator
-    store.async_update_room = AsyncMock()
-    entity = RoomMindOverrideClimate(coordinator, "living_room")
-    await entity.async_set_hvac_mode(HVACMode.OFF)
-    store.async_update_room.assert_awaited_once_with(
-        "living_room",
-        {
-            "override_temp": None,
-            "override_heat_temp": None,
-            "override_cool_temp": None,
-            "override_until": None,
-            "override_type": None,
-        },
-    )
-    coordinator.async_request_refresh.assert_awaited_once()
-
-
 @pytest.mark.asyncio
 async def test_async_setup_entry_creates_entities_for_all_rooms():
-    """async_setup_entry creates both climate entities for each room."""
+    """async_setup_entry creates one climate entity per room."""
     coordinator = MagicMock()
     coordinator._climate_entity_areas = set()
 
@@ -294,9 +229,8 @@ async def test_async_setup_entry_creates_entities_for_all_rooms():
     assert coordinator.async_add_climate_entities is async_add_entities
     async_add_entities.assert_called_once()
     entities = async_add_entities.call_args[0][0]
-    assert len(entities) == 4
-    assert sum(isinstance(e, RoomMindRoomClimate) for e in entities) == 2
-    assert sum(isinstance(e, RoomMindOverrideClimate) for e in entities) == 2
+    assert len(entities) == 2
+    assert all(isinstance(e, RoomMindRoomClimate) for e in entities)
     assert "living_room" in coordinator._climate_entity_areas
     assert "bedroom" in coordinator._climate_entity_areas
 

@@ -7,14 +7,22 @@ import time
 from datetime import timedelta
 from typing import Any
 
+from homeassistant.components.climate import HVACAction, HVACMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import (
+    CLIMATE_SOURCE_COMFORT,
+    CLIMATE_SOURCE_COMFORT_HOLD,
+    CLIMATE_SOURCE_ECO_HOLD,
+    CLIMATE_SOURCE_MANUAL_HOLD,
+    CLIMATE_SOURCE_PRESENCE_AWAY,
+    CLIMATE_SOURCE_SCHEDULE,
+    CLIMATE_SOURCE_VACATION,
     AC_COOLING_BOOST_TARGET,
     AC_HEATING_BOOST_TARGET,
+    CLIMATE_MODE_AUTO,
     CLIMATE_MODE_COOL_ONLY,
     CLIMATE_MODE_HEAT_ONLY,
     DEFAULT_COMFORT_COOL,
@@ -31,11 +39,23 @@ from .const import (
     MODE_COOLING,
     MODE_HEATING,
     MODE_IDLE,
+    OVERRIDE_BOOST,
+    OVERRIDE_ECO,
+    PRESET_COMFORT,
+    PRESET_AWAY,
+    PRESET_ECO,
+    PRESET_OVERRIDE,
+    PRESET_SCHEDULE,
+    PRESET_VACATION,
+    ResolvedClimateState,
+    RoomClimateView,
     SCHEDULE_STATE_ON,
     THERMAL_SAVE_CYCLES,
     UPDATE_INTERVAL,
     TargetTemps,
     build_override_live,
+    clear_room_override_payload,
+    get_room_override_targets,
     make_roommind_context,
 )
 from .control.mpc_controller import (
@@ -65,23 +85,13 @@ from .utils.device_utils import (
     get_direct_setpoint_eids,
     get_trv_eids,
 )
+from .utils.entity_naming import get_area_name
 from .utils.history_store import HistoryStore
 from .utils.schedule_utils import resolve_schedule_index
 from .utils.sensor_utils import read_sensor_value
 from .utils.temp_utils import celsius_delta_to_ha, ha_temp_to_celsius, ha_temp_unit_str
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def _get_area_name(hass: HomeAssistant, area_id: str) -> str:
-    """Get human-readable area name from area registry."""
-    try:
-        area_reg = ar.async_get(hass)
-        area = area_reg.async_get_area(area_id)
-        return area.name if area else area_id
-    except Exception:  # noqa: BLE001
-        return area_id
-
 
 class RoomMindCoordinator(DataUpdateCoordinator):
     """Central coordinator for RoomMind room data and state."""
@@ -378,7 +388,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         """
         mold = await self._mold_manager.evaluate(
             area_id,
-            _get_area_name(self.hass, area_id),
+            get_area_name(self.hass, area_id),
             current_temp,
             current_humidity,
             self.outdoor_temp,
@@ -396,6 +406,15 @@ class RoomMindCoordinator(DataUpdateCoordinator):
 
         # --- Outdoor room: skip all control logic ---
         if room.get("is_outdoor", False):
+            climate_view = self._build_room_climate_view(
+                room=room,
+                current_temp=current_temp,
+                target_temp=None,
+                targets=TargetTemps(),
+                display_mode=MODE_IDLE,
+                active_source=None,
+                preset_mode=None,
+            )
             return {
                 "area_id": area_id,
                 "current_temp": current_temp,
@@ -412,6 +431,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
                 "override_type": None,
                 "override_temp": None,
                 "override_until": None,
+                "override_remaining_minutes": None,
                 "active_schedule_index": -1,
                 "confidence": None,
                 "mpc_active": False,
@@ -429,6 +449,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
                 "active_cover_schedule_index": -1,
                 "q_occupancy": 0.0,
                 "active_heat_sources": None,
+                "climate": climate_view.as_dict(),
             }
 
         # --- Mold risk calculation ---
@@ -449,9 +470,9 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         schedule_entity_id = get_active_schedule_entity(self.hass, room)
         schedule_blocks = await read_schedule_blocks(self.hass, schedule_entity_id) if schedule_entity_id else None
 
-        # Determine dual heat/cool target temperatures
-        # Returns TargetTemps(heat, cool). None values mean "force off".
-        targets = self._resolve_target_temps(room, settings, schedule_blocks, schedule_entity_id)
+        # Determine dual heat/cool target temperatures and their policy source.
+        resolved_state = self._resolve_target_state(room, settings, schedule_blocks, schedule_entity_id)
+        targets = resolved_state.targets
 
         # Apply mold prevention temperature delta (heating target only).
         # Safety: mold prevention overrides "off" to prevent structural damage.
@@ -708,9 +729,11 @@ class RoomMindCoordinator(DataUpdateCoordinator):
             power_fraction = 0.0
 
         # --- Cover/blind automatic control ---
-        has_override = room.get("override_temp") is not None and (
-            room.get("override_until") is None or room.get("override_until", 0) > time.time()
-        )
+        has_override = (
+            room.get("override_temp") is not None
+            or room.get("override_heat_temp") is not None
+            or room.get("override_cool_temp") is not None
+        ) and (room.get("override_until") is None or room.get("override_until", 0) > time.time())
         cover_result = await self._cover_orchestrator.async_process(
             area_id=area_id,
             room=room,
@@ -746,6 +769,16 @@ class RoomMindCoordinator(DataUpdateCoordinator):
             climate_active=climate_active,
         )
 
+        climate_view = self._build_room_climate_view(
+            room=room,
+            current_temp=current_temp,
+            target_temp=target_temp,
+            targets=targets,
+            display_mode=display_mode,
+            active_source=resolved_state.active_source,
+            preset_mode=resolved_state.preset_mode,
+        )
+
         return self._build_room_state_dict(
             area_id=area_id,
             room=room,
@@ -774,6 +807,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
             q_occupancy=q_occupancy,
             cover_eids=cover_eids,
             cover_result=cover_result,
+            climate_view=climate_view,
         )
 
     async def _observe_and_train(
@@ -944,6 +978,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         q_occupancy: float,
         cover_eids: list[str],
         cover_result: CoverResult,
+        climate_view: RoomClimateView,
     ) -> dict:
         """Build the final room state dictionary."""
         _room_devices = room.get("devices", [])
@@ -1004,6 +1039,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
             "cover_forced_reason": (cover_result.forced_reason if cover_eids else ""),
             "active_cover_schedule_index": (cover_result.active_cover_schedule_index if cover_eids else -1),
             "active_heat_sources": self._heat_source_states.get(area_id),
+            "climate": climate_view.as_dict(),
         }
 
     @staticmethod
@@ -1195,43 +1231,123 @@ class RoomMindCoordinator(DataUpdateCoordinator):
 
         return resolve_schedule_index(self.hass, room)
 
-    def _resolve_target_temps(
+    def _room_hvac_capabilities(self, room: dict) -> tuple[bool, bool]:
+        """Return hardware heat/cool capability, independent of selected mode."""
+        devices = room.get("devices", [])
+        has_heat = bool(get_trv_eids(devices) or room.get("thermostats", []))
+        has_cool = bool(get_ac_eids(devices) or room.get("acs", []))
+        if devices and check_acs_can_heat(self.hass, room):
+            has_heat = True
+        return has_heat, has_cool
+
+    @staticmethod
+    def _supported_hvac_modes(*, has_heat: bool, has_cool: bool) -> tuple[HVACMode, ...]:
+        """Return Home Assistant HVAC modes supported by the room hardware."""
+        modes: list[HVACMode] = [HVACMode.OFF]
+        if has_heat:
+            modes.append(HVACMode.HEAT)
+        if has_cool:
+            modes.append(HVACMode.COOL)
+        if has_heat and has_cool:
+            modes.append(HVACMode.HEAT_COOL)
+        return tuple(modes)
+
+    def _selected_hvac_mode(
+        self,
+        room: dict,
+        *,
+        has_heat: bool,
+        has_cool: bool,
+    ) -> HVACMode:
+        """Return the currently selected HVAC mode from room config."""
+        if not room.get("climate_control_enabled", True):
+            return HVACMode.OFF
+
+        climate_mode = room.get("climate_mode", CLIMATE_MODE_AUTO)
+        if climate_mode == CLIMATE_MODE_HEAT_ONLY:
+            return HVACMode.HEAT if has_heat else HVACMode.OFF
+        if climate_mode == CLIMATE_MODE_COOL_ONLY:
+            return HVACMode.COOL if has_cool else HVACMode.OFF
+        if has_heat and has_cool:
+            return HVACMode.HEAT_COOL
+        if has_heat:
+            return HVACMode.HEAT
+        if has_cool:
+            return HVACMode.COOL
+        return HVACMode.OFF
+
+    @staticmethod
+    def _preset_from_override_type(override_type: str | None) -> tuple[str, str | None]:
+        """Map a RoomMind override type to source and preset values."""
+        if override_type == OVERRIDE_BOOST:
+            return CLIMATE_SOURCE_COMFORT_HOLD, PRESET_COMFORT
+        if override_type == OVERRIDE_ECO:
+            return CLIMATE_SOURCE_ECO_HOLD, PRESET_ECO
+        return CLIMATE_SOURCE_MANUAL_HOLD, PRESET_OVERRIDE
+
+    def _build_room_climate_view(
+        self,
+        *,
+        room: dict,
+        current_temp: float | None,
+        target_temp: float | None,
+        targets: TargetTemps,
+        display_mode: str,
+        active_source: str | None,
+        preset_mode: str | None,
+    ) -> RoomClimateView:
+        """Build the live climate view published for a room."""
+        has_heat, has_cool = self._room_hvac_capabilities(room)
+        hvac_mode = self._selected_hvac_mode(room, has_heat=has_heat, has_cool=has_cool)
+        if hvac_mode == HVACMode.OFF:
+            hvac_action = HVACAction.OFF
+        elif display_mode == MODE_HEATING:
+            hvac_action = HVACAction.HEATING
+        elif display_mode == MODE_COOLING:
+            hvac_action = HVACAction.COOLING
+        else:
+            hvac_action = HVACAction.IDLE
+
+        supports_target_range = has_heat and has_cool
+        return RoomClimateView(
+            hvac_mode=hvac_mode,
+            hvac_action=hvac_action,
+            supported_hvac_modes=self._supported_hvac_modes(has_heat=has_heat, has_cool=has_cool),
+            supports_target_range=supports_target_range,
+            preset_mode=preset_mode,
+            active_source=active_source,
+            current_temperature=current_temp,
+            target_temperature=target_temp,
+            target_temperature_low=targets.heat if supports_target_range else None,
+            target_temperature_high=targets.cool if supports_target_range else None,
+        )
+
+    def _resolve_target_state(
         self,
         room: dict,
         settings: dict,
         schedule_blocks: dict | None = None,
         schedule_entity_id: str | None = None,
-    ) -> TargetTemps:
-        """Resolve dual heat/cool target temperatures.
-
-        Priority: override > vacation > presence away > schedule block temp > comfort/eco.
-        Returns TargetTemps(heat, cool). None values mean "force off".
-        """
+    ) -> ResolvedClimateState:
+        """Resolve targets and report which policy source produced them."""
         from .utils.schedule_utils import find_active_block
 
-        # 1. Override — single-point target
-        override_temp = room.get("override_temp")
         override_until = room.get("override_until")
-        if override_temp is not None:
+        override_targets = get_room_override_targets(room)
+        if override_targets is not None:
             if override_until is None or time.time() < override_until:
-                t = float(override_temp)
-                return TargetTemps(heat=t, cool=t)
-            else:
-                # Timed override has expired — auto-clear
-                area_id = room.get("area_id", "unknown")
-                store = self.hass.data[DOMAIN]["store"]
-                self.hass.async_create_task(
-                    store.async_update_room(
-                        area_id,
-                        {
-                            "override_temp": None,
-                            "override_until": None,
-                            "override_type": None,
-                        },
-                    )
+                active_source, preset_mode = self._preset_from_override_type(room.get("override_type"))
+                return ResolvedClimateState(
+                    targets=override_targets,
+                    active_source=active_source,
+                    preset_mode=preset_mode,
                 )
+            area_id = room.get("area_id", "unknown")
+            store = self.hass.data[DOMAIN]["store"]
+            self.hass.async_create_task(
+                store.async_update_room(area_id, clear_room_override_payload())
+            )
 
-        # 2. Vacation — heat setback, cooling stays at eco_cool
         vacation_until = settings.get("vacation_until")
         if vacation_until is not None:
             if time.time() < vacation_until:
@@ -1239,7 +1355,11 @@ class RoomMindCoordinator(DataUpdateCoordinator):
                 if vacation_temp is not None:
                     t = float(vacation_temp)
                     eco_cool = room.get("eco_cool", DEFAULT_ECO_COOL)
-                    return TargetTemps(heat=t, cool=max(t, eco_cool))
+                    return ResolvedClimateState(
+                        targets=TargetTemps(heat=t, cool=max(t, eco_cool)),
+                        active_source=CLIMATE_SOURCE_VACATION,
+                        preset_mode=PRESET_VACATION,
+                    )
             else:
                 self.hass.async_create_task(
                     self.hass.data[DOMAIN]["store"].async_save_settings(
@@ -1249,42 +1369,47 @@ class RoomMindCoordinator(DataUpdateCoordinator):
                     )
                 )
 
-        # 2.5 Presence-based eco or off (skip if room ignores presence)
         if not room.get("ignore_presence", False) and self._is_presence_away(room, settings):
             if settings.get("presence_away_action", "eco") == "off":
-                return TargetTemps(heat=None, cool=None)
-            return TargetTemps(
-                heat=room.get("eco_heat", room.get("eco_temp", DEFAULT_ECO_HEAT)),
-                cool=room.get("eco_cool", DEFAULT_ECO_COOL),
+                return ResolvedClimateState(
+                    targets=TargetTemps(heat=None, cool=None),
+                    active_source=CLIMATE_SOURCE_PRESENCE_AWAY,
+                    preset_mode=PRESET_AWAY,
+                )
+            return ResolvedClimateState(
+                targets=TargetTemps(
+                    heat=room.get("eco_heat", room.get("eco_temp", DEFAULT_ECO_HEAT)),
+                    cool=room.get("eco_cool", DEFAULT_ECO_COOL),
+                ),
+                active_source=CLIMATE_SOURCE_PRESENCE_AWAY,
+                preset_mode=PRESET_AWAY,
             )
 
-        # 3. Schedule / comfort / eco
         comfort_heat = room.get("comfort_heat", room.get("comfort_temp", DEFAULT_COMFORT_HEAT))
         comfort_cool = room.get("comfort_cool", DEFAULT_COMFORT_COOL)
         eco_heat = room.get("eco_heat", room.get("eco_temp", DEFAULT_ECO_HEAT))
         eco_cool = room.get("eco_cool", DEFAULT_ECO_COOL)
 
-        # schedule_entity_id is pre-resolved by the caller (_async_process_room) to avoid
-        # a second resolve_schedule_index() call that could diverge if selector state changes.
         if not schedule_entity_id:
-            return TargetTemps(heat=comfort_heat, cool=comfort_cool)
+            return ResolvedClimateState(
+                targets=TargetTemps(heat=comfort_heat, cool=comfort_cool),
+                active_source=CLIMATE_SOURCE_COMFORT,
+            )
 
         state = self.hass.states.get(schedule_entity_id)
         if state is None or state.state in ("unavailable", "unknown"):
-            return TargetTemps(heat=comfort_heat, cool=comfort_cool)
+            return ResolvedClimateState(
+                targets=TargetTemps(heat=comfort_heat, cool=comfort_cool),
+                active_source=CLIMATE_SOURCE_COMFORT,
+            )
 
         if state.state == SCHEDULE_STATE_ON:
             if schedule_blocks is not None:
-                # Read all temperature fields from block data.
-                # HA does not expose custom data keys (heat_temperature, cool_temperature)
-                # as entity state attributes, so schedule.get_schedule is required.
                 block_data = find_active_block(schedule_blocks, time.time()) or {}
                 heat_temp = block_data.get("heat_temperature")
                 cool_temp = block_data.get("cool_temperature")
                 block_temp = block_data.get("temperature")
             else:
-                # Fallback when schedule.get_schedule is unavailable (non-schedule.* entity
-                # or service failure). Works for temperature; heat/cool split will not resolve.
                 heat_temp = state.attributes.get("heat_temperature")
                 cool_temp = state.attributes.get("cool_temperature")
                 block_temp = state.attributes.get("temperature")
@@ -1302,19 +1427,52 @@ class RoomMindCoordinator(DataUpdateCoordinator):
                         c = ha_temp_to_celsius(self.hass, float(cool_temp))
                     except (ValueError, TypeError):
                         pass
-                return TargetTemps(heat=h, cool=c)
+                return ResolvedClimateState(
+                    targets=TargetTemps(heat=h, cool=c),
+                    active_source=CLIMATE_SOURCE_SCHEDULE,
+                    preset_mode=PRESET_SCHEDULE,
+                )
             if block_temp is not None:
                 try:
                     t = ha_temp_to_celsius(self.hass, float(block_temp))
-                    return TargetTemps(heat=t, cool=t)  # single-point
+                    return ResolvedClimateState(
+                        targets=TargetTemps(heat=t, cool=t),
+                        active_source=CLIMATE_SOURCE_SCHEDULE,
+                        preset_mode=PRESET_SCHEDULE,
+                    )
                 except (ValueError, TypeError):
                     pass
-            return TargetTemps(heat=comfort_heat, cool=comfort_cool)
+            return ResolvedClimateState(
+                targets=TargetTemps(heat=comfort_heat, cool=comfort_cool),
+                active_source=CLIMATE_SOURCE_SCHEDULE,
+                preset_mode=PRESET_SCHEDULE,
+            )
 
-        # Schedule is "off" -> eco or off
         if settings.get("schedule_off_action", "eco") == "off":
-            return TargetTemps(heat=None, cool=None)
-        return TargetTemps(heat=eco_heat, cool=eco_cool)
+            return ResolvedClimateState(
+                targets=TargetTemps(heat=None, cool=None),
+                active_source=CLIMATE_SOURCE_SCHEDULE,
+                preset_mode=PRESET_SCHEDULE,
+            )
+        return ResolvedClimateState(
+            targets=TargetTemps(heat=eco_heat, cool=eco_cool),
+            active_source=CLIMATE_SOURCE_SCHEDULE,
+            preset_mode=PRESET_SCHEDULE,
+        )
+
+    def _resolve_target_temps(
+        self,
+        room: dict,
+        settings: dict,
+        schedule_blocks: dict | None = None,
+        schedule_entity_id: str | None = None,
+    ) -> TargetTemps:
+        """Resolve dual heat/cool target temperatures.
+
+        Priority: override > vacation > presence away > schedule block temp > comfort/eco.
+        Returns TargetTemps(heat, cool). None values mean "force off".
+        """
+        return self._resolve_target_state(room, settings, schedule_blocks, schedule_entity_id).targets
 
     async def async_room_added(self, room: dict) -> None:
         """Create entity platform entities for a newly added/updated room and refresh data."""
@@ -1328,7 +1486,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
             self.async_add_entities(entities)
             self._entity_areas.add(area_id)
 
-        # Climate entities (override control): always create
+        # Climate entities: always create
         if (
             area_id not in self._climate_entity_areas
             and hasattr(self, "async_add_climate_entities")
@@ -1423,10 +1581,18 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         registry = er.async_get(self.hass)
 
         # Known valid suffixes for each condition
-        always_valid = ("_target_temp", "_mode", "_override", "_climate_control")
+        always_valid = (
+            "_target_temp",
+            "_mode",
+            "_override_until",
+            "_override_remaining",
+            "_climate",
+            "_override",
+            "_climate_control",
+        )
         cover_only = ("_cover_auto", "_cover_paused")
         # Global entities (not per-room) that should never be cleaned up
-        global_uids = {f"{DOMAIN}_vacation"}
+        global_uids = {f"{DOMAIN}_vacation", f"{DOMAIN}_default_override_timeout"}
 
         to_remove: list[str] = []
         for entity_entry in registry.entities.values():

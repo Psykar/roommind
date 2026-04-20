@@ -60,6 +60,8 @@
   "override.eco": "Eco",
   "override.custom": "Custom",
   "override.target": "Target:",
+  "override.target_heat": "Heat:",
+  "override.target_cool": "Cool:",
   "override.activate_for": "Activate for:",
   "override.error_set": "Failed to set override",
   "override.error_clear": "Failed to clear override",
@@ -151,7 +153,9 @@
   "schedule.from_schedule": "{temp}{unit} from schedule",
   "schedule.from_schedule_split": "{heat}{unit} / {cool}{unit} from schedule",
   "schedule.fallback": "{temp}{unit} (fallback)",
+  "schedule.fallback_split": "{heat}{unit} / {cool}{unit} (fallback)",
   "schedule.eco_detail": "{temp}{unit} (eco)",
+  "schedule.eco_detail_split": "{heat}{unit} / {cool}{unit} (eco)",
 
   "devices.climate_entities": "Climate entities",
   "devices.temp_sensors": "Temperature sensors",
@@ -302,6 +306,8 @@
   "settings.weather_entity_hint": "Optional: enables predictive outdoor temperature planning",
   "settings.prediction_enabled": "Temperature prediction",
   "settings.prediction_enabled_hint": "Show predicted temperature trend in analytics charts. Disable if you experience slow performance.",
+  "settings.default_override_timeout": "Default climate override timeout",
+  "settings.default_override_timeout_hint": "Applies to overrides created from the climate entity. Set to 0 for no automatic timeout.",
 
   "vacation.title": "Vacation Mode",
   "vacation.hint": "Sets all rooms to a setback temperature until the end date.",

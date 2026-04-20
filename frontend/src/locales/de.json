@@ -60,6 +60,8 @@
   "override.eco": "Eco",
   "override.custom": "Individuell",
   "override.target": "Ziel:",
+  "override.target_heat": "Heizen:",
+  "override.target_cool": "Kühlen:",
   "override.activate_for": "Aktivieren für:",
   "override.error_set": "Override konnte nicht gesetzt werden",
   "override.error_clear": "Override konnte nicht aufgehoben werden",
@@ -151,7 +153,9 @@
   "schedule.from_schedule": "{temp}{unit} vom Zeitplan",
   "schedule.from_schedule_split": "{heat}{unit} / {cool}{unit} vom Zeitplan",
   "schedule.fallback": "{temp}{unit} (Fallback)",
+  "schedule.fallback_split": "{heat}{unit} / {cool}{unit} (Fallback)",
   "schedule.eco_detail": "{temp}{unit} (Eco)",
+  "schedule.eco_detail_split": "{heat}{unit} / {cool}{unit} (Eco)",
 
   "devices.climate_entities": "Klimageräte",
   "devices.temp_sensors": "Temperatursensoren",
@@ -302,6 +306,8 @@
   "settings.weather_entity_hint": "Optional: ermöglicht vorausschauende Außentemperaturplanung",
   "settings.prediction_enabled": "Temperaturvorhersage",
   "settings.prediction_enabled_hint": "Zeigt den vorhergesagten Temperaturverlauf im Analyse-Diagramm. Bei langsamer Performance deaktivieren.",
+  "settings.default_override_timeout": "Standard-Timeout für Klima-Overrides",
+  "settings.default_override_timeout_hint": "Gilt für Overrides, die über die Klima-Entität erstellt werden. 0 bedeutet kein automatisches Timeout.",
 
   "vacation.title": "Urlaubsmodus",
   "vacation.hint": "Setzt alle Räume auf eine Absenktemperatur bis zum Enddatum.",

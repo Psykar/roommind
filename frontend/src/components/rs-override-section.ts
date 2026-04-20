@@ -24,10 +24,14 @@ export class RsOverrideSection extends LitElement {
 
   @state() private _overridePending: OverrideType | null = null;
   @state() private _overrideCustomTemp = 21;
+  @state() private _overrideCustomHeat = 21;
+  @state() private _overrideCustomCool = 24;
   @state() private _overrideError = "";
   @state() private _optimisticOverride: {
     type: OverrideType;
-    temp: number;
+    temp: number | null;
+    heatTemp: number | null;
+    coolTemp: number | null;
     until: number | null;
   } | null = null;
   @state() private _optimisticClear = false;
@@ -193,16 +197,20 @@ export class RsOverrideSection extends LitElement {
     active: boolean;
     type: OverrideType | null;
     temp: number | null;
+    heatTemp: number | null;
+    coolTemp: number | null;
     until: number | null;
   } {
     if (this._optimisticClear) {
-      return { active: false, type: null, temp: null, until: null };
+      return { active: false, type: null, temp: null, heatTemp: null, coolTemp: null, until: null };
     }
     if (this._optimisticOverride) {
       return {
         active: true,
         type: this._optimisticOverride.type,
         temp: this._optimisticOverride.temp,
+        heatTemp: this._optimisticOverride.heatTemp,
+        coolTemp: this._optimisticOverride.coolTemp,
         until: this._optimisticOverride.until,
       };
     }
@@ -212,10 +220,12 @@ export class RsOverrideSection extends LitElement {
         active: true,
         type: live.override_type,
         temp: live.override_temp,
+        heatTemp: live.override_heat_temp ?? null,
+        coolTemp: live.override_cool_temp ?? null,
         until: live.override_until,
       };
     }
-    return { active: false, type: null, temp: null, until: null };
+    return { active: false, type: null, temp: null, heatTemp: null, coolTemp: null, until: null };
   }
 
   render() {
@@ -234,6 +244,7 @@ export class RsOverrideSection extends LitElement {
   private _renderOverrideButtons(ov: ReturnType<typeof this.getEffectiveOverride>) {
     const activeType = ov.active ? ov.type : null;
     const showDuration = !activeType && this._overridePending;
+    const supportsRange = this._supportsTargetRange();
 
     return html`
       <div class="override-presets">
@@ -252,9 +263,9 @@ export class RsOverrideSection extends LitElement {
                 icon=${t === "boost" ? "mdi:fire" : t === "eco" ? "mdi:leaf" : "mdi:thermometer"}
               ></ha-icon>
               ${t === "boost"
-                ? `${localize("override.comfort", this.language)} ${formatTemp(this.climateMode === "cool_only" ? this.comfortCool : this.comfortHeat, this.hass)}${tempUnit(this.hass)}`
+                ? `${localize("override.comfort", this.language)} ${this._formatOverrideSummary(this.comfortHeat, this.comfortCool, supportsRange)}`
                 : t === "eco"
-                  ? `${localize("override.eco", this.language)} ${formatTemp(this.climateMode === "cool_only" ? this.ecoCool : this.ecoHeat, this.hass)}${tempUnit(this.hass)}`
+                  ? `${localize("override.eco", this.language)} ${this._formatOverrideSummary(this.ecoHeat, this.ecoCool, supportsRange)}`
                   : localize("override.custom", this.language)}
             </button>
           `;
@@ -264,18 +275,47 @@ export class RsOverrideSection extends LitElement {
         ? html`
             ${this._overridePending === "custom"
               ? html`
-                  <div class="override-custom-row">
-                    <span>${localize("override.target", this.language)}</span>
-                    <input
-                      type="number"
-                      min=${tempRange(5, 35, this.hass).min}
-                      max=${tempRange(5, 35, this.hass).max}
-                      step=${tempStep(this.hass)}
-                      .value=${String(toDisplay(this._overrideCustomTemp, this.hass))}
-                      @input=${this._onOverrideCustomTempInput}
-                    />
-                    <span>${tempUnit(this.hass)}</span>
-                  </div>
+                  ${supportsRange
+                    ? html`
+                        <div class="override-custom-row">
+                          <span>${localize("override.target_heat", this.language)}</span>
+                          <input
+                            type="number"
+                            min=${tempRange(5, 35, this.hass).min}
+                            max=${tempRange(5, 35, this.hass).max}
+                            step=${tempStep(this.hass)}
+                            .value=${String(toDisplay(this._overrideCustomHeat, this.hass))}
+                            @input=${this._onOverrideCustomHeatInput}
+                          />
+                          <span>${tempUnit(this.hass)}</span>
+                        </div>
+                        <div class="override-custom-row">
+                          <span>${localize("override.target_cool", this.language)}</span>
+                          <input
+                            type="number"
+                            min=${tempRange(5, 35, this.hass).min}
+                            max=${tempRange(5, 35, this.hass).max}
+                            step=${tempStep(this.hass)}
+                            .value=${String(toDisplay(this._overrideCustomCool, this.hass))}
+                            @input=${this._onOverrideCustomCoolInput}
+                          />
+                          <span>${tempUnit(this.hass)}</span>
+                        </div>
+                      `
+                    : html`
+                        <div class="override-custom-row">
+                          <span>${localize("override.target", this.language)}</span>
+                          <input
+                            type="number"
+                            min=${tempRange(5, 35, this.hass).min}
+                            max=${tempRange(5, 35, this.hass).max}
+                            step=${tempStep(this.hass)}
+                            .value=${String(toDisplay(this._overrideCustomTemp, this.hass))}
+                            @input=${this._onOverrideCustomTempInput}
+                          />
+                          <span>${tempUnit(this.hass)}</span>
+                        </div>
+                      `}
                 `
               : nothing}
             <div class="override-duration">
@@ -308,8 +348,9 @@ export class RsOverrideSection extends LitElement {
     } else {
       this._overridePending = type;
       if (type === "custom") {
-        this._overrideCustomTemp =
-          this.climateMode === "cool_only" ? this.comfortCool : this.comfortHeat;
+        this._overrideCustomTemp = this.climateMode === "cool_only" ? this.comfortCool : this.comfortHeat;
+        this._overrideCustomHeat = this.comfortHeat;
+        this._overrideCustomCool = this.comfortCool;
       }
     }
     this._overrideError = "";
@@ -322,22 +363,56 @@ export class RsOverrideSection extends LitElement {
     );
   }
 
+  private _onOverrideCustomHeatInput(e: Event): void {
+    this._overrideCustomHeat = toCelsius(
+      Number((e.target as HTMLInputElement).value) || toDisplay(this.comfortHeat, this.hass),
+      this.hass,
+    );
+  }
+
+  private _onOverrideCustomCoolInput(e: Event): void {
+    this._overrideCustomCool = toCelsius(
+      Number((e.target as HTMLInputElement).value) || toDisplay(this.comfortCool, this.hass),
+      this.hass,
+    );
+  }
+
   private async _onOverrideActivate(hours: number): Promise<void> {
     if (!this._overridePending || !this.config) return;
 
     const pendingType = this._overridePending;
-    let temp: number;
+    const supportsRange = this._supportsTargetRange();
+    let temp: number | null = null;
+    let heatTemp: number | null = null;
+    let coolTemp: number | null = null;
     if (pendingType === "boost") {
-      temp = this.climateMode === "cool_only" ? this.comfortCool : this.comfortHeat;
+      if (supportsRange) {
+        heatTemp = this.comfortHeat;
+        coolTemp = this.comfortCool;
+      } else {
+        temp = this.climateMode === "cool_only" ? this.comfortCool : this.comfortHeat;
+      }
     } else if (pendingType === "eco") {
-      temp = this.climateMode === "cool_only" ? this.ecoCool : this.ecoHeat;
+      if (supportsRange) {
+        heatTemp = this.ecoHeat;
+        coolTemp = this.ecoCool;
+      } else {
+        temp = this.climateMode === "cool_only" ? this.ecoCool : this.ecoHeat;
+      }
     } else {
-      temp = this._overrideCustomTemp;
+      if (supportsRange) {
+        heatTemp = Math.min(this._overrideCustomHeat, this._overrideCustomCool);
+        coolTemp = Math.max(this._overrideCustomHeat, this._overrideCustomCool);
+      } else {
+        temp = this._overrideCustomTemp;
+      }
     }
 
     this._optimisticOverride = {
       type: pendingType,
       temp,
+      heatTemp,
+      coolTemp,
       until: Date.now() / 1000 + hours * 3600,
     };
     this._optimisticClear = false;
@@ -351,7 +426,12 @@ export class RsOverrideSection extends LitElement {
       duration: hours,
     };
     if (pendingType === "custom") {
-      msg.temperature = temp;
+      if (supportsRange) {
+        msg.target_temp_low = heatTemp;
+        msg.target_temp_high = coolTemp;
+      } else {
+        msg.temperature = temp;
+      }
     }
 
     try {
@@ -390,6 +470,34 @@ export class RsOverrideSection extends LitElement {
 
   private _fireRoomUpdated(): void {
     this.dispatchEvent(new CustomEvent("room-updated", { bubbles: true, composed: true }));
+  }
+
+  private _supportsTargetRange(): boolean {
+    const liveClimate = this.config?.live?.climate;
+    if (liveClimate?.supports_target_range !== undefined) {
+      return Boolean(liveClimate.supports_target_range);
+    }
+    if (liveClimate?.target_temperature_low != null || liveClimate?.target_temperature_high != null) {
+      return true;
+    }
+    if (this.config?.live?.heat_target != null || this.config?.live?.cool_target != null) {
+      return this.config.live.heat_target != null && this.config.live.cool_target != null;
+    }
+    const devices = this.config?.devices ?? [];
+    const hasHeat = Boolean(devices.some((device) => device.type === "trv") || this.config?.thermostats?.length);
+    const hasCool = Boolean(devices.some((device) => device.type === "ac") || this.config?.acs?.length);
+    return hasHeat && hasCool;
+  }
+
+  private _formatOverrideSummary(heat: number, cool: number, supportsRange: boolean): string {
+    if (!supportsRange) {
+      const value = this.climateMode === "cool_only" ? cool : heat;
+      return `${formatTemp(value, this.hass)}${tempUnit(this.hass)}`;
+    }
+    if (Math.abs(heat - cool) <= 0.05) {
+      return `${formatTemp(heat, this.hass)}${tempUnit(this.hass)}`;
+    }
+    return `${formatTemp(heat, this.hass)}-${formatTemp(cool, this.hass)}${tempUnit(this.hass)}`;
   }
 }
 

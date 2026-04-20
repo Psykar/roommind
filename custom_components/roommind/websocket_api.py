@@ -22,14 +22,19 @@ from .const import (
     DEFAULT_ECO_HEAT,
     DOMAIN,
     OVERRIDE_TYPES,
+    TargetTemps,
+    build_room_override_payload,
     build_override_live,
+    clear_room_override_payload,
 )
+from .control.mpc_controller import check_acs_can_heat
 from .services.analytics_service import (
     _compute_target_forecast,  # noqa: F401 - re-exported for tests
     _csv_to_points,  # noqa: F401 - re-exported for tests
     _safe_float,  # noqa: F401 - re-exported for tests
     build_analytics_data,
 )
+from .utils.device_utils import get_ac_eids, get_trv_eids
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -43,6 +48,66 @@ def _get_coordinator(hass: HomeAssistant) -> RoomMindCoordinator | None:
     """Return the RoomMindCoordinator from hass.data, or None."""
     coordinator: RoomMindCoordinator | None = hass.data.get(DOMAIN, {}).get("coordinator")
     return coordinator
+
+
+def _room_hvac_capabilities(hass: HomeAssistant, room: dict) -> tuple[bool, bool]:
+    """Return hardware heat/cool capability, independent of selected mode."""
+    devices = room.get("devices", [])
+    has_heat = bool(get_trv_eids(devices) or room.get("thermostats", []))
+    has_cool = bool(get_ac_eids(devices) or room.get("acs", []))
+    if devices and check_acs_can_heat(hass, room):
+        has_heat = True
+    return has_heat, has_cool
+
+
+def _override_targets_from_request(hass: HomeAssistant, room: dict, msg: dict) -> TargetTemps | None:
+    """Return normalized override targets for an override request."""
+    override_type = msg["override_type"]
+    temperature = msg.get("temperature")
+    low = msg.get("target_temp_low")
+    high = msg.get("target_temp_high")
+    has_heat, has_cool = _room_hvac_capabilities(hass, room)
+    supports_range = has_heat and has_cool
+    climate_mode = room.get("climate_mode", "auto")
+
+    if override_type == "boost":
+        if supports_range:
+            return TargetTemps(
+                heat=float(room.get("comfort_heat", room.get("comfort_temp", DEFAULT_COMFORT_HEAT))),
+                cool=float(room.get("comfort_cool", DEFAULT_COMFORT_COOL)),
+            )
+        target = (
+            float(room.get("comfort_cool", DEFAULT_COMFORT_COOL))
+            if climate_mode == "cool_only"
+            else float(room.get("comfort_heat", room.get("comfort_temp", DEFAULT_COMFORT_HEAT)))
+        )
+        return TargetTemps(heat=target, cool=target)
+
+    if override_type == "eco":
+        if supports_range:
+            return TargetTemps(
+                heat=float(room.get("eco_heat", room.get("eco_temp", DEFAULT_ECO_HEAT))),
+                cool=float(room.get("eco_cool", DEFAULT_ECO_COOL)),
+            )
+        target = (
+            float(room.get("eco_cool", DEFAULT_ECO_COOL))
+            if climate_mode == "cool_only"
+            else float(room.get("eco_heat", room.get("eco_temp", DEFAULT_ECO_HEAT)))
+        )
+        return TargetTemps(heat=target, cool=target)
+
+    if low is not None or high is not None:
+        if low is None or high is None:
+            return None
+        return TargetTemps(heat=float(low), cool=float(high))
+
+    if temperature is None:
+        return None
+
+    value = float(temperature)
+    if supports_range:
+        return TargetTemps(heat=value, cool=value)
+    return TargetTemps(heat=value, cool=value)
 
 
 _ROOM_SAVE_FIELDS = (
@@ -107,6 +172,7 @@ _SETTINGS_SAVE_FIELDS = (
     "presence_persons",
     "presence_away_action",
     "schedule_off_action",
+    "default_override_timeout_minutes",
     "valve_protection_enabled",
     "valve_protection_interval_days",
     "mold_detection_enabled",
@@ -192,6 +258,7 @@ async def websocket_list_rooms(
     for area_id, room_config in rooms.items():
         room_data = dict(room_config)
         live = live_states.get(area_id, {})
+        override_live = build_override_live(room_config)
 
         room_data["live"] = {
             "current_temp": live.get("current_temp"),
@@ -203,7 +270,13 @@ async def websocket_list_rooms(
             "heating_power": live.get("heating_power", 0),
             "device_setpoint": live.get("device_setpoint"),
             "window_open": live.get("window_open", False),
-            **build_override_live(room_config),
+            **override_live,
+            "override_remaining_minutes": (
+                live.get("override_remaining_minutes")
+                if live.get("override_remaining_minutes") is not None
+                else override_live.get("override_remaining_minutes")
+            ),
+            "climate": live.get("climate"),
             "active_schedule_index": live.get("active_schedule_index", -1),
             "confidence": live.get("confidence"),
             "mpc_active": live.get("mpc_active", False),
@@ -244,6 +317,7 @@ async def websocket_list_rooms(
             "presence_persons": settings.get("presence_persons", []),
             "presence_away_action": settings.get("presence_away_action", "eco"),
             "schedule_off_action": settings.get("schedule_off_action", "eco"),
+            "default_override_timeout_minutes": settings.get("default_override_timeout_minutes", 120),
             "anyone_home": _compute_anyone_home(hass, settings),
             "valve_protection_enabled": settings.get("valve_protection_enabled", False),
             "compressor_groups": settings.get("compressor_groups", []),
@@ -409,6 +483,8 @@ async def websocket_delete_room(
         vol.Required("area_id"): str,
         vol.Required("override_type"): vol.In(OVERRIDE_TYPES),
         vol.Optional("temperature"): vol.Coerce(float),
+        vol.Optional("target_temp_low"): vol.Coerce(float),
+        vol.Optional("target_temp_high"): vol.Coerce(float),
         vol.Optional("duration"): vol.Coerce(float),  # hours (omit or 0 for permanent)
     }
 )
@@ -429,36 +505,29 @@ async def websocket_override_set(
         connection.send_error(msg["id"], "not_found", f"Room '{area_id}' not found")
         return
 
-    # Resolve override temperature
-    if override_type == "boost":
-        climate_mode = room.get("climate_mode", "auto")
-        if climate_mode == "cool_only":
-            override_temp = room.get("comfort_cool", DEFAULT_COMFORT_COOL)
+    targets = _override_targets_from_request(hass, room, msg)
+    if targets is None:
+        if override_type == "custom":
+            connection.send_error(
+                msg["id"],
+                "invalid",
+                "Custom override requires temperature or both target_temp_low and target_temp_high",
+            )
         else:
-            override_temp = room.get("comfort_heat", room.get("comfort_temp", DEFAULT_COMFORT_HEAT))
-    elif override_type == "eco":
-        climate_mode = room.get("climate_mode", "auto")
-        if climate_mode == "cool_only":
-            override_temp = room.get("eco_cool", DEFAULT_ECO_COOL)
-        else:
-            override_temp = room.get("eco_heat", room.get("eco_temp", DEFAULT_ECO_HEAT))
-    else:  # custom
-        override_temp = msg.get("temperature")
-        if override_temp is None:
-            connection.send_error(msg["id"], "invalid", "Custom override requires temperature")
-            return
+            connection.send_error(msg["id"], "invalid", "Override payload is incomplete")
+        return
 
     override_until = (time.time() + duration_hours * 3600) if duration_hours else None
+    has_heat, has_cool = _room_hvac_capabilities(hass, room)
 
     await store.async_update_room(
         area_id,
-        {
-            "override_temp": override_temp,
-            "override_heat_temp": None,
-            "override_cool_temp": None,
-            "override_until": override_until,
-            "override_type": override_type,
-        },
+        build_room_override_payload(
+            targets,
+            override_until=override_until,
+            override_type=override_type,
+            prefer_single_value=not (has_heat and has_cool),
+        ),
     )
 
     coordinator = _get_coordinator(hass)
@@ -496,13 +565,7 @@ async def websocket_override_clear(
 
     await store.async_update_room(
         area_id,
-        {
-            "override_temp": None,
-            "override_heat_temp": None,
-            "override_cool_temp": None,
-            "override_until": None,
-            "override_type": None,
-        },
+        clear_room_override_payload(),
     )
 
     coordinator = _get_coordinator(hass)
@@ -554,6 +617,7 @@ async def websocket_get_settings(
         vol.Optional("presence_persons"): [str],
         vol.Optional("presence_away_action"): vol.In(["eco", "off"]),
         vol.Optional("schedule_off_action"): vol.In(["eco", "off"]),
+        vol.Optional("default_override_timeout_minutes"): vol.All(vol.Coerce(int), vol.Range(min=0, max=10080)),
         vol.Optional("valve_protection_enabled"): bool,
         vol.Optional("valve_protection_interval_days"): vol.All(vol.Coerce(int), vol.Range(min=1, max=90)),
         vol.Optional("mold_detection_enabled"): bool,

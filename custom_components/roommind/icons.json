@@ -8,7 +8,9 @@
               "comfort": "mdi:sofa",
               "eco": "mdi:leaf",
               "override": "mdi:tune-variant",
-              "schedule": "mdi:calendar-clock"
+              "schedule": "mdi:calendar-clock",
+              "vacation": "mdi:beach",
+              "away": "mdi:walk"
             }
           }
         }

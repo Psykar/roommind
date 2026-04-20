@@ -8,7 +8,9 @@
               "comfort": "Komfort",
               "eco": "Eco",
               "override": "Manuell",
-              "schedule": "Zeitplan"
+              "schedule": "Zeitplan",
+              "vacation": "Urlaub",
+              "away": "Abwesend"
             }
           }
         }

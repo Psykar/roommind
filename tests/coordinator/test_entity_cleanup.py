@@ -41,6 +41,10 @@ class TestCoverageGaps:
         entry_valid_cover_paused.unique_id = f"{DOMAIN}_living_room_cover_paused"
         entry_valid_cover_paused.entity_id = "binary_sensor.roommind_living_room_cover_paused"
 
+        entry_valid_override = MagicMock()
+        entry_valid_override.unique_id = f"{DOMAIN}_living_room_override"
+        entry_valid_override.entity_id = "climate.roommind_living_room_override"
+
         # Orphaned: room no longer exists
         entry_orphaned_room = MagicMock()
         entry_orphaned_room.unique_id = f"{DOMAIN}_deleted_room_target_temp"
@@ -62,6 +66,7 @@ class TestCoverageGaps:
             entry_valid_mode,
             entry_valid_cover_auto,
             entry_valid_cover_paused,
+            entry_valid_override,
             entry_orphaned_room,
             entry_other,
             entry_vacation,
@@ -136,8 +141,12 @@ class TestCoverageGaps:
         entry_valid_climate.unique_id = f"{DOMAIN}_living_room_climate"
         entry_valid_climate.entity_id = "climate.roommind_living_room"
 
+        entry_valid_override = MagicMock()
+        entry_valid_override.unique_id = f"{DOMAIN}_living_room_override"
+        entry_valid_override.entity_id = "climate.roommind_living_room_override"
+
         mock_registry = MagicMock()
-        mock_registry.entities.values.return_value = [entry_valid, entry_valid_climate]
+        mock_registry.entities.values.return_value = [entry_valid, entry_valid_climate, entry_valid_override]
 
         with patch(
             "homeassistant.helpers.entity_registry.async_get",

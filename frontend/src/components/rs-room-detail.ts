@@ -331,6 +331,8 @@ export class RsRoomDetail extends LitElement {
     active: boolean;
     type: import("../types").OverrideType | null;
     temp: number | null;
+    heatTemp: number | null;
+    coolTemp: number | null;
     until: number | null;
   } {
     const overrideEl = this.shadowRoot?.querySelector(
@@ -346,10 +348,12 @@ export class RsRoomDetail extends LitElement {
         active: true,
         type: live.override_type,
         temp: live.override_temp,
+        heatTemp: live.override_heat_temp ?? null,
+        coolTemp: live.override_cool_temp ?? null,
         until: live.override_until,
       };
     }
-    return { active: false, type: null, temp: null, until: null };
+    return { active: false, type: null, temp: null, heatTemp: null, coolTemp: null, until: null };
   }
 
   render() {

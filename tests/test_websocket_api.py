@@ -193,6 +193,35 @@ async def test_list_rooms_after_save(ws_hass, store, connection):
 
 
 @pytest.mark.asyncio
+async def test_list_rooms_preserves_store_override_remaining_before_live_refresh(ws_hass, store, connection, monkeypatch):
+    """Store-derived override timeout info survives even before coordinator live data exists."""
+    await store.async_load()
+    await store.async_save_room(
+        "kitchen",
+        {
+            "thermostats": ["climate.kitchen_trv"],
+            "override_temp": 22.0,
+            "override_until": 1_700_007_200.0,
+            "override_type": "custom",
+        },
+    )
+    monkeypatch.setattr("custom_components.roommind.const.time.time", lambda: 1_700_000_000.0)
+
+    mock_coordinator = MagicMock()
+    mock_coordinator.rooms = {}
+    mock_coordinator.async_request_refresh = AsyncMock()
+    ws_hass.data[DOMAIN]["coordinator"] = mock_coordinator
+
+    list_msg = {"id": 3, "type": "roommind/rooms/list"}
+    await _list_rooms(ws_hass, connection, list_msg)
+
+    room = connection.send_result.call_args[0][1]["rooms"]["kitchen"]
+    assert room["live"]["override_active"] is True
+    assert room["live"]["override_until"] == 1_700_007_200.0
+    assert room["live"]["override_remaining_minutes"] == 120
+
+
+@pytest.mark.asyncio
 async def test_list_rooms_reflects_updated_schedule_temperatures(ws_hass, store, connection):
     """list_rooms returns the latest comfort/eco temps after external store updates."""
     await store.async_load()
@@ -529,6 +558,72 @@ async def test_override_set_custom(ws_hass, store, connection):
 
 
 @pytest.mark.asyncio
+async def test_override_set_boost_range_room_uses_split_targets(ws_hass, store, connection):
+    """Boost override on a dual-target room persists separate heat/cool targets."""
+    await store.async_load()
+
+    save_msg = {
+        "id": 2,
+        "type": "roommind/rooms/save",
+        "area_id": "living",
+        "thermostats": ["climate.living_trv"],
+        "acs": ["climate.living_ac"],
+        "comfort_heat": 21.0,
+        "comfort_cool": 24.0,
+    }
+    await _save_room(ws_hass, connection, save_msg)
+    connection.send_result.reset_mock()
+
+    msg = {
+        "id": 3,
+        "type": "roommind/override/set",
+        "area_id": "living",
+        "override_type": "boost",
+        "duration": 2.0,
+    }
+    await _override_set(ws_hass, connection, msg)
+
+    room = store.get_room("living")
+    assert room["override_temp"] is None
+    assert room["override_heat_temp"] == 21.0
+    assert room["override_cool_temp"] == 24.0
+    assert room["override_type"] == "boost"
+
+
+@pytest.mark.asyncio
+async def test_override_set_custom_range_room_uses_split_targets(ws_hass, store, connection):
+    """Custom override on a dual-target room accepts low/high targets."""
+    await store.async_load()
+
+    save_msg = {
+        "id": 2,
+        "type": "roommind/rooms/save",
+        "area_id": "office",
+        "thermostats": ["climate.office_trv"],
+        "acs": ["climate.office_ac"],
+    }
+    await _save_room(ws_hass, connection, save_msg)
+    connection.send_result.reset_mock()
+
+    msg = {
+        "id": 3,
+        "type": "roommind/override/set",
+        "area_id": "office",
+        "override_type": "custom",
+        "target_temp_low": 19.0,
+        "target_temp_high": 25.0,
+        "duration": 1.0,
+    }
+    await _override_set(ws_hass, connection, msg)
+
+    room = store.get_room("office")
+    assert room["override_temp"] is None
+    assert room["override_heat_temp"] == 19.0
+    assert room["override_cool_temp"] == 25.0
+    assert room["override_type"] == "custom"
+
+
+@pytest.mark.asyncio
 async def test_override_set_custom_without_temp_errors(ws_hass, store, connection):
     """Custom override without temperature sends an error."""
     await store.async_load()
@@ -813,6 +908,23 @@ async def test_save_settings(ws_hass, store, connection):
     connection.send_result.assert_called_once()
     result = connection.send_result.call_args[0][1]
     assert result["settings"]["outdoor_temp_sensor"] == "sensor.outdoor"
+
+
+@pytest.mark.asyncio
+async def test_save_settings_default_override_timeout(ws_hass, store, connection):
+    """Saving default override timeout persists and returns updated settings."""
+    await store.async_load()
+
+    msg = {
+        "id": 111,
+        "type": "roommind/settings/save",
+        "default_override_timeout_minutes": 45,
+    }
+    await _save_settings(ws_hass, connection, msg)
+
+    connection.send_result.assert_called_once()
+    result = connection.send_result.call_args[0][1]
+    assert result["settings"]["default_override_timeout_minutes"] == 45
 
 
 # ---------------------------------------------------------------------------

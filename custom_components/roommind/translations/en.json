@@ -8,7 +8,9 @@
               "comfort": "Comfort",
               "eco": "Eco",
               "override": "Override",
-              "schedule": "Schedule"
+              "schedule": "Schedule",
+              "vacation": "Vacation",
+              "away": "Away"
             }
           }
         }

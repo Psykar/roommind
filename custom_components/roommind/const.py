@@ -1,7 +1,8 @@
 """Constants for the RoomMind integration."""
 
+from dataclasses import dataclass
 import time
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from homeassistant.const import Platform
 from homeassistant.core import Context
@@ -10,7 +11,7 @@ DOMAIN = "roommind"
 VERSION = "1.7.1-beta.4"
 
 # Platforms
-PLATFORMS = [Platform.SENSOR, Platform.SWITCH, Platform.BINARY_SENSOR, Platform.CLIMATE]
+PLATFORMS = [Platform.SENSOR, Platform.SWITCH, Platform.BINARY_SENSOR, Platform.CLIMATE, Platform.NUMBER]
 
 # Climate modes
 CLIMATE_MODE_AUTO = "auto"
@@ -23,6 +24,24 @@ OVERRIDE_BOOST = "boost"
 OVERRIDE_ECO = "eco"
 OVERRIDE_CUSTOM = "custom"
 OVERRIDE_TYPES = [OVERRIDE_BOOST, OVERRIDE_ECO, OVERRIDE_CUSTOM]
+
+# Climate presets
+PRESET_COMFORT = "comfort"
+PRESET_ECO = "eco"
+PRESET_OVERRIDE = "override"
+PRESET_SCHEDULE = "schedule"
+PRESET_VACATION = "vacation"
+PRESET_AWAY = "away"
+
+# Effective climate source
+CLIMATE_SOURCE_COMFORT = "comfort"
+CLIMATE_SOURCE_COMFORT_HOLD = "comfort_hold"
+CLIMATE_SOURCE_ECO = "eco"
+CLIMATE_SOURCE_ECO_HOLD = "eco_hold"
+CLIMATE_SOURCE_MANUAL_HOLD = "manual_hold"
+CLIMATE_SOURCE_PRESENCE_AWAY = "presence_away"
+CLIMATE_SOURCE_SCHEDULE = "schedule"
+CLIMATE_SOURCE_VACATION = "vacation"
 
 # Room modes
 MODE_IDLE = "idle"
@@ -41,6 +60,9 @@ DEFAULT_COMFORT_HEAT = 21.0
 DEFAULT_COMFORT_COOL = 24.0
 DEFAULT_ECO_HEAT = 17.0
 DEFAULT_ECO_COOL = 27.0
+SETTING_DEFAULT_OVERRIDE_TIMEOUT_MINUTES = "default_override_timeout_minutes"
+DEFAULT_CLIMATE_OVERRIDE_TIMEOUT_MINUTES = 120
+MAX_CLIMATE_OVERRIDE_TIMEOUT_MINUTES = 10080
 
 
 # Context identifier for RoomMind-initiated service calls.
@@ -58,6 +80,112 @@ class TargetTemps(NamedTuple):
 
     heat: float | None = None  # None = don't heat / force off
     cool: float | None = None  # None = don't cool / force off
+
+
+def get_room_override_targets(room: dict) -> TargetTemps | None:
+    """Return normalized override targets from a room config dict."""
+    override_heat_temp = room.get("override_heat_temp")
+    override_cool_temp = room.get("override_cool_temp")
+    if override_heat_temp is not None or override_cool_temp is not None:
+        return TargetTemps(
+            heat=float(override_heat_temp) if isinstance(override_heat_temp, (int, float)) else None,
+            cool=float(override_cool_temp) if isinstance(override_cool_temp, (int, float)) else None,
+        )
+
+    override_temp = room.get("override_temp")
+    if isinstance(override_temp, (int, float)):
+        value = float(override_temp)
+        return TargetTemps(heat=value, cool=value)
+    return None
+
+
+def get_override_display_temp(targets: TargetTemps | None) -> float | None:
+    """Return a single display value when override targets collapse to one point."""
+    if targets is None:
+        return None
+    if targets.heat is not None and targets.cool is not None and abs(targets.heat - targets.cool) <= 0.05:
+        return targets.heat
+    if targets.heat is not None and targets.cool is None:
+        return targets.heat
+    if targets.cool is not None and targets.heat is None:
+        return targets.cool
+    return None
+
+
+def clear_room_override_payload() -> dict[str, float | None | str]:
+    """Return the payload that clears any stored override."""
+    return {
+        "override_temp": None,
+        "override_heat_temp": None,
+        "override_cool_temp": None,
+        "override_until": None,
+        "override_type": None,
+    }
+
+
+def build_room_override_payload(
+    targets: TargetTemps,
+    *,
+    override_until: float | None,
+    override_type: str,
+    prefer_single_value: bool = False,
+) -> dict[str, float | None | str]:
+    """Return storage payload for normalized override targets."""
+    if prefer_single_value and targets.heat is not None and targets.cool is not None and abs(targets.heat - targets.cool) <= 0.05:
+        return {
+            "override_temp": targets.heat,
+            "override_heat_temp": None,
+            "override_cool_temp": None,
+            "override_until": override_until,
+            "override_type": override_type,
+        }
+    return {
+        "override_temp": None,
+        "override_heat_temp": targets.heat,
+        "override_cool_temp": targets.cool,
+        "override_until": override_until,
+        "override_type": override_type,
+    }
+
+
+@dataclass(frozen=True)
+class ResolvedClimateState:
+    """Resolved room climate targets plus the policy source behind them."""
+
+    targets: TargetTemps
+    active_source: str | None = None
+    preset_mode: str | None = None
+
+
+@dataclass(frozen=True)
+class RoomClimateView:
+    """Live room climate state consumed by the climate entity."""
+
+    hvac_mode: str
+    hvac_action: str
+    supported_hvac_modes: tuple[str, ...]
+    supports_target_range: bool
+    preset_mode: str | None
+    active_source: str | None
+    current_temperature: float | None
+    target_temperature: float | None
+    target_temperature_low: float | None
+    target_temperature_high: float | None
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return a JSON-friendly representation."""
+        return {
+            "hvac_mode": self.hvac_mode,
+            "hvac_action": self.hvac_action,
+            "supported_hvac_modes": list(self.supported_hvac_modes),
+            "supports_target_range": self.supports_target_range,
+            "preset_mode": self.preset_mode,
+            "active_source": self.active_source,
+            "current_temperature": self.current_temperature,
+            "target_temperature": self.target_temperature,
+            "target_temperature_low": self.target_temperature_low,
+            "target_temperature_high": self.target_temperature_high,
+        }
 
 
 # Smart control defaults
@@ -178,19 +306,18 @@ VACATION_SENTINEL_UNTIL = 32503680000.0
 
 def build_override_live(room: dict) -> dict:
     """Build override fields for live data from a room config dict."""
-    override_temp = room.get("override_temp")
-    override_heat_temp = room.get("override_heat_temp")
-    override_cool_temp = room.get("override_cool_temp")
+    now = time.time()
+    targets = get_room_override_targets(room)
     override_until = room.get("override_until")
-    active = bool(
-        (override_temp is not None or override_heat_temp is not None or override_cool_temp is not None)
-        and (override_until is None or time.time() < override_until)
-    )
+    active = bool(targets is not None and (override_until is None or now < override_until))
     return {
         "override_active": active,
         "override_type": room.get("override_type") if active else None,
-        "override_temp": override_temp if active else None,
-        "override_heat_temp": override_heat_temp if active else None,
-        "override_cool_temp": override_cool_temp if active else None,
+        "override_temp": get_override_display_temp(targets) if active else None,
+        "override_heat_temp": (targets.heat if targets is not None else None) if active else None,
+        "override_cool_temp": (targets.cool if targets is not None else None) if active else None,
         "override_until": override_until if active else None,
+        "override_remaining_minutes": (
+            max(0, round((override_until - now) / 60)) if active and isinstance(override_until, (int, float)) else None
+        ),
     }

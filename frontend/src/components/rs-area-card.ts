@@ -516,13 +516,15 @@ export class RsAreaCard extends LitElement {
   private _renderTargetInfo(live: NonNullable<RoomConfig["live"]>) {
     if (live.target_temp === null && live.heat_target === null) return nothing;
 
-    // Show range for auto mode with different heat/cool targets
-    const climateMode = this.config?.climate_mode ?? "auto";
+    const liveClimate = live.climate;
     const showRange =
-      climateMode === "auto" &&
+      (liveClimate?.supports_target_range === true ||
+        liveClimate?.target_temperature_low != null ||
+        liveClimate?.target_temperature_high != null ||
+        (live.heat_target != null && live.cool_target != null)) &&
       live.heat_target != null &&
       live.cool_target != null &&
-      live.heat_target !== live.cool_target;
+      Math.abs(live.heat_target - live.cool_target) > 0.05;
 
     const targetDisplay = showRange
       ? html`<span class="target-value"

@@ -8,6 +8,19 @@ export type RoomMode = "idle" | "heating" | "cooling";
 
 export type OverrideType = "boost" | "eco" | "custom";
 
+export interface RoomClimateLiveData {
+  hvac_mode?: string;
+  hvac_action?: string;
+  supported_hvac_modes?: string[];
+  supports_target_range?: boolean;
+  preset_mode?: string | null;
+  active_source?: string | null;
+  current_temperature?: number | null;
+  target_temperature?: number | null;
+  target_temperature_low?: number | null;
+  target_temperature_high?: number | null;
+}
+
 export interface NotificationTarget {
   entity_id: string;
   person_entity: string;
@@ -37,7 +50,7 @@ export interface RoomLiveData {
   override_heat: number | null;
   override_cool: number | null;
   override_until: number | null;
-  override_suppressed: boolean;
+  override_remaining_minutes?: number | null;
   active_schedule_index: number;
   window_open: boolean;
   confidence: number | null;
@@ -54,6 +67,7 @@ export interface RoomLiveData {
   active_cover_schedule_index: number;
   active_heat_sources: string | null;
   learning_paused_reason: "outdoor_unavailable" | null;
+  climate?: RoomClimateLiveData;
 }
 
 export type DeviceType = "trv" | "ac";
@@ -160,6 +174,7 @@ export interface GlobalSettings {
   presence_away_action?: "eco" | "off";
   presence_clears_override?: boolean;
   schedule_off_action?: "eco" | "off";
+  default_override_timeout_minutes?: number;
   valve_protection_enabled?: boolean;
   valve_protection_interval_days?: number;
   mold_detection_enabled?: boolean;

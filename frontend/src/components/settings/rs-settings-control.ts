@@ -21,6 +21,7 @@ export class RsSettingsControl extends RsSettingsBase {
   @property({ type: Number }) public outdoorHeatingMax = 22;
   @property({ type: Boolean }) public predictionEnabled = true;
   @property({ type: String }) public scheduleOffAction: "eco" | "off" = "eco";
+  @property({ type: Number }) public defaultOverrideTimeoutMinutes = 120;
 
   render() {
     const l = this.hass.language;
@@ -133,6 +134,25 @@ export class RsSettingsControl extends RsSettingsBase {
           <ha-list-item value="eco">${localize("schedule.off_action_eco", l)}</ha-list-item>
           <ha-list-item value="off">${localize("schedule.off_action_off", l)}</ha-list-item>
         </ha-select>
+      </div>
+
+      <div class="settings-section">
+        <div class="threshold-field">
+          <ha-textfield
+            .value=${String(this.defaultOverrideTimeoutMinutes)}
+            .label=${localize("settings.default_override_timeout", l)}
+            suffix="min"
+            type="number"
+            step="15"
+            min="0"
+            max="10080"
+            @change=${(e: Event) => {
+              const v = parseInt((e.target as HTMLInputElement).value, 10);
+              if (!isNaN(v)) this._fire("defaultOverrideTimeoutMinutes", Math.max(0, Math.min(v, 10080)));
+            }}
+          ></ha-textfield>
+          <span class="field-hint">${localize("settings.default_override_timeout_hint", l)}</span>
+        </div>
       </div>
     `;
   }

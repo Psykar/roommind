@@ -20,6 +20,7 @@
 - **Solar Gain Awareness** - Estimates solar irradiance from sun position and weather data. The model learns each room's solar response and reduces unnecessary heating.
 - **Multi-Scheduler** - Multiple `schedule.*` entities per room with selector switching via `input_boolean` or `input_number`.
 - **Manual Override** - Boost, eco, or custom temperature with configurable duration and instant UI feedback.
+- **Climate Presets** - RoomMind climate entities expose `comfort`, `eco`, `override`, and `schedule` presets so dashboards and voice assistants can switch between stored RoomMind targets and normal schedule-following behavior.
 - **Presence Detection** - Link `person.*`, `device_tracker.*`, `binary_sensor.*`, or `input_boolean.*` entities globally or per room. Eco temperature is used when all assigned persons are away.
 - **Ignore Presence per Room** - Rooms can opt out of presence detection to always follow their schedule.
 - **Vacation Mode** - Global setback temperature with end date for all rooms.
@@ -115,6 +116,14 @@ For a more detailed explanation of the `Priority` slider, device types, setpoint
 | `binary_sensor.roommind_{area_id}_cover_paused` | On when manual cover override is detected |
 
 These can be used in HA automations, dashboards, or other integrations.
+
+The RoomMind climate entity presets map to RoomMind behavior like this:
+- `comfort` uses the room's stored comfort targets and stores a RoomMind `boost` override for backward compatibility.
+- `eco` uses the room's stored eco targets.
+- `override` freezes the current effective target(s) into a manual custom override.
+- `schedule` clears overrides and follows normal RoomMind target resolution again.
+
+If you change the climate target while `comfort` or `eco` is selected, RoomMind updates the stored preset values. If you change the target while `schedule` is selected, RoomMind automatically creates a custom `override`.
 
 ## Troubleshooting
 

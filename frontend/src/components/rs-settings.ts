@@ -53,6 +53,7 @@ export class RsSettings extends LitElement {
   @state() private _presenceAwayAction: "eco" | "off" = "eco";
   @state() private _presenceClearsOverride = false;
   @state() private _scheduleOffAction: "eco" | "off" = "eco";
+  @state() private _defaultOverrideTimeoutMinutes = 120;
   @state() private _valveProtectionEnabled = false;
   @state() private _valveProtectionInterval = 7;
   @state() private _moldDetectionEnabled = false;
@@ -111,6 +112,7 @@ export class RsSettings extends LitElement {
       this._presenceAwayAction = s.presence_away_action ?? "eco";
       this._presenceClearsOverride = s.presence_clears_override ?? false;
       this._scheduleOffAction = s.schedule_off_action ?? "eco";
+      this._defaultOverrideTimeoutMinutes = s.default_override_timeout_minutes ?? 120;
       this._valveProtectionEnabled = s.valve_protection_enabled ?? false;
       this._valveProtectionInterval = s.valve_protection_interval_days ?? 7;
       this._moldDetectionEnabled = s.mold_detection_enabled ?? false;
@@ -181,6 +183,7 @@ export class RsSettings extends LitElement {
           .outdoorHeatingMax=${this._outdoorHeatingMax}
           .predictionEnabled=${this._predictionEnabled}
           .scheduleOffAction=${this._scheduleOffAction}
+          .defaultOverrideTimeoutMinutes=${this._defaultOverrideTimeoutMinutes}
           @setting-changed=${this._onSettingChanged}
         ></rs-settings-control>
       </rs-settings-panel>
@@ -353,6 +356,7 @@ export class RsSettings extends LitElement {
         presence_away_action: this._presenceAwayAction,
         presence_clears_override: this._presenceClearsOverride,
         schedule_off_action: this._scheduleOffAction,
+        default_override_timeout_minutes: this._defaultOverrideTimeoutMinutes,
         valve_protection_enabled: this._valveProtectionEnabled,
         valve_protection_interval_days: this._valveProtectionInterval,
         compressor_groups: this._compressorGroups.filter((g) => g.members.length > 0),

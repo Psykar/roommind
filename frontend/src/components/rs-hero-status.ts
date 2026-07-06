@@ -358,6 +358,17 @@ export class RsHeroStatus extends LitElement {
     return null;
   }
 
+  private _supportsTargetRange(live: NonNullable<RoomConfig["live"]>): boolean {
+    const liveClimate = live.climate;
+    if (liveClimate?.supports_target_range !== undefined) {
+      return Boolean(liveClimate.supports_target_range);
+    }
+    if (liveClimate?.target_temperature_low != null || liveClimate?.target_temperature_high != null) {
+      return true;
+    }
+    return live.heat_target != null && live.cool_target != null;
+  }
+
   private _renderTargetSection(live: NonNullable<RoomConfig["live"]>) {
     const targetTemp = live.target_temp;
     const l = this.hass?.language ?? "en";
@@ -402,12 +413,11 @@ export class RsHeroStatus extends LitElement {
     }
 
     if (targetTemp !== null || (live.heat_target != null && live.cool_target != null)) {
-      const climateMode = this.config?.climate_mode ?? "auto";
       const showRange =
-        climateMode === "auto" &&
+        this._supportsTargetRange(live) &&
         live.heat_target != null &&
         live.cool_target != null &&
-        live.heat_target !== live.cool_target;
+        Math.abs(live.heat_target - live.cool_target) > 0.05;
 
       const display = showRange
         ? html`${formatTemp(live.heat_target!, this.hass)} –

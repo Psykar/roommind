@@ -220,10 +220,7 @@ export class RsRoomDetail extends LitElement {
       this._initFromConfig();
       this._prevAreaId = currentAreaId;
     } else if (changedProps.has("config") && !this._dirty) {
-      const prevConfig = changedProps.get("config") as RoomConfig | null | undefined;
-      if (prevConfig === null || prevConfig === undefined) {
-        this._initFromConfig();
-      }
+      this._initFromConfig();
     }
 
     if (
@@ -334,11 +331,6 @@ export class RsRoomDetail extends LitElement {
       this._heatSourceAcMinOutdoor = -15.0;
     }
     this._dirty = false;
-
-    // Unconfigured rooms open the device-edit dialog automatically.
-    if (this._devices.length === 0 && this._editing === null) {
-      this._editing = "devices";
-    }
   }
 
   private _openEdit = (section: EditableSection) => () => {

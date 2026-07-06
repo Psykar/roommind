@@ -96,6 +96,73 @@ async def test_mpc_apply_idle():
 
 
 @pytest.mark.asyncio
+async def test_mpc_apply_eco_sets_supported_child_preset():
+    """Automatic eco mode pushes an eco preset to supported child climates."""
+    hass = build_hass()
+    state = MagicMock()
+    state.state = "heat"
+    state.attributes = {
+        "hvac_modes": ["off", "heat"],
+        "preset_modes": ["none", "eco"],
+        "preset_mode": "none",
+        "min_temp": 5.0,
+        "max_temp": 30.0,
+        "temperature": 21.0,
+    }
+    hass.states.get = MagicMock(return_value=state)
+
+    room = make_room()
+    ctrl = MPCController(
+        hass,
+        room,
+        model_manager=RoomModelManager(),
+        outdoor_temp=5.0,
+        settings={},
+        has_external_sensor=True,
+    )
+
+    await ctrl.async_apply("heating", 17.0, device_preset_mode="eco")
+
+    preset_calls = [c for c in hass.services.async_call.call_args_list if c[0][1] == "set_preset_mode"]
+    assert len(preset_calls) == 1
+    assert preset_calls[0][0][2] == {"entity_id": "climate.living_trv", "preset_mode": "eco"}
+
+
+@pytest.mark.asyncio
+async def test_mpc_apply_non_eco_clears_child_eco_preset():
+    """Leaving eco clears a previously forced eco preset when the child supports none."""
+    _last_commands.clear()
+    hass = build_hass()
+    state = MagicMock()
+    state.state = "heat"
+    state.attributes = {
+        "hvac_modes": ["off", "heat"],
+        "preset_modes": ["none", "eco"],
+        "preset_mode": "eco",
+        "min_temp": 5.0,
+        "max_temp": 30.0,
+        "temperature": 17.0,
+    }
+    hass.states.get = MagicMock(return_value=state)
+
+    room = make_room()
+    ctrl = MPCController(
+        hass,
+        room,
+        model_manager=RoomModelManager(),
+        outdoor_temp=5.0,
+        settings={},
+        has_external_sensor=True,
+    )
+
+    await ctrl.async_apply("heating", 21.0)
+
+    preset_calls = [c for c in hass.services.async_call.call_args_list if c[0][1] == "set_preset_mode"]
+    assert len(preset_calls) == 1
+    assert preset_calls[0][0][2] == {"entity_id": "climate.living_trv", "preset_mode": "none"}
+
+
+@pytest.mark.asyncio
 async def test_async_apply_backward_compat():
     """Calling async_apply without power_fraction uses default 1.0 → 30°C boost."""
     from custom_components.roommind.control.mpc_controller import HEATING_BOOST_TARGET

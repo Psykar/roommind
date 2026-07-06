@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -398,6 +398,25 @@ class TestPresenceDetection:
         room = data["rooms"]["living_room_abc12345"]
         assert room["target_temp"] == 17.0  # eco_temp
         assert room["force_off"] is False
+
+    @pytest.mark.asyncio
+    async def test_presence_away_eco_passes_device_preset_hint(self, hass, mock_config_entry):
+        """Presence-based eco forwards an eco preset hint to the controller."""
+        store = _make_store_mock({"living_room_abc12345": SAMPLE_ROOM})
+        store.get_settings.return_value = {
+            "presence_enabled": True,
+            "presence_persons": ["person.kevin"],
+            "presence_away_action": "eco",
+        }
+        hass.data = {"roommind": {"store": store}}
+        hass.states.get = MagicMock(side_effect=_presence_states_get())
+        hass.services.async_call = AsyncMock()
+
+        coordinator = _create_coordinator(hass, mock_config_entry)
+        with patch("custom_components.roommind.control.mpc_controller.MPCController.async_apply", new=AsyncMock()) as apply_mock:
+            await coordinator._async_update_data()
+
+        assert apply_mock.await_args.kwargs["device_preset_mode"] == "eco"
 
     @pytest.mark.asyncio
     async def test_override_beats_force_off(self, hass, mock_config_entry):

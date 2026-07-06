@@ -269,7 +269,7 @@ class TestMoldRiskDetection:
 
         coordinator = _create_coordinator(hass, mock_config_entry)
         with patch(
-            "custom_components.roommind.coordinator._get_area_name",
+            "custom_components.roommind.coordinator.get_area_name",
             return_value="Living Room",
         ):
             await coordinator._async_update_data()

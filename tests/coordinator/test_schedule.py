@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -438,6 +438,23 @@ class TestPresenceDetection:
         room = data["rooms"]["living_room_abc12345"]
         assert room["target_temp"] == 17.0  # eco_temp
         assert room["force_off"] is False
+
+    @pytest.mark.asyncio
+    async def test_schedule_off_eco_passes_device_preset_hint(self, hass, mock_config_entry):
+        """Schedule-off eco forwards an eco preset hint to the controller."""
+        store = _make_store_mock({"living_room_abc12345": SAMPLE_ROOM})
+        store.get_settings.return_value = {
+            "schedule_off_action": "eco",
+        }
+        hass.data = {"roommind": {"store": store}}
+        hass.states.get = MagicMock(side_effect=make_mock_states_get(schedule_state="off"))
+        hass.services.async_call = AsyncMock()
+
+        coordinator = _create_coordinator(hass, mock_config_entry)
+        with patch("custom_components.roommind.control.mpc_controller.MPCController.async_apply", new=AsyncMock()) as apply_mock:
+            await coordinator._async_update_data()
+
+        assert apply_mock.await_args.kwargs["device_preset_mode"] == "eco"
 
 
 class TestScheduleServiceFailureRecovery:

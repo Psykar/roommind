@@ -182,10 +182,11 @@ class TestRoomMindCoordinator:
         room = {"area_id": "bedroom_abc12345"}
         await coordinator.async_room_added(room)
 
-        # async_add_entities should be called with 3 entities
+        # async_add_entities should be called with the room sensor entities
+        # (target temp, mode, override-until, override-remaining)
         mock_add_entities.assert_called_once()
         entities = mock_add_entities.call_args[0][0]
-        assert len(entities) == 2
+        assert len(entities) == 4
 
         # Verify entity types
         from custom_components.roommind.sensor import (
@@ -369,13 +370,13 @@ class TestCoverageGaps:
 
     @pytest.mark.asyncio
     async def test_get_area_name_returns_area_id_when_area_none(self, hass, mock_config_entry):
-        """_get_area_name returns area_id when area is not found."""
-        from custom_components.roommind.coordinator import _get_area_name
+        """get_area_name returns area_id when area is not found."""
+        from custom_components.roommind.utils.entity_naming import get_area_name
 
         mock_reg = MagicMock()
         mock_reg.async_get_area.return_value = None
-        with patch("custom_components.roommind.coordinator.ar.async_get", return_value=mock_reg):
-            result = _get_area_name(hass, "nonexistent_area")
+        with patch("custom_components.roommind.utils.entity_naming.ar.async_get", return_value=mock_reg):
+            result = get_area_name(hass, "nonexistent_area")
         assert result == "nonexistent_area"
 
     @pytest.mark.asyncio

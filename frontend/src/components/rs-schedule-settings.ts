@@ -387,6 +387,7 @@ export class RsScheduleSettings extends RsScheduleBase {
 
   private _getStatusText(index: number, state: "active" | "inactive" | "unreachable"): string {
     const l = this.hass.language;
+    const supportsRange = this.climateMode === "auto";
 
     if (state === "unreachable") return localize("schedule.state_unreachable", l);
     if (state === "inactive") return localize("schedule.state_inactive", l);
@@ -414,11 +415,26 @@ export class RsScheduleSettings extends RsScheduleBase {
           unit: tempUnit(this.hass),
         });
       }
+      if (supportsRange) {
+        return localize("schedule.fallback_split", l, {
+          heat: formatTemp(this.comfortHeat, this.hass),
+          cool: formatTemp(this.comfortCool, this.hass),
+          unit: tempUnit(this.hass),
+        });
+      }
       return localize("schedule.fallback", l, {
         temp: formatTemp(
           this.climateMode === "cool_only" ? this.comfortCool : this.comfortHeat,
           this.hass,
         ),
+        unit: tempUnit(this.hass),
+      });
+    }
+
+    if (supportsRange) {
+      return localize("schedule.eco_detail_split", l, {
+        heat: formatTemp(this.ecoHeat, this.hass),
+        cool: formatTemp(this.ecoCool, this.hass),
         unit: tempUnit(this.hass),
       });
     }

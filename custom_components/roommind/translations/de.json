@@ -1,4 +1,22 @@
 {
+  "entity": {
+    "climate": {
+      "room_climate": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "comfort": "Komfort",
+              "eco": "Eco",
+              "override": "Manuell",
+              "schedule": "Zeitplan",
+              "vacation": "Urlaub",
+              "away": "Abwesend"
+            }
+          }
+        }
+      }
+    }
+  },
   "config": {
     "step": {
       "user": {

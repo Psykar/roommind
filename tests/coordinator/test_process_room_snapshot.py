@@ -49,6 +49,7 @@ NORMAL_ROOM_KEYS = {
     "override_heat",
     "override_cool",
     "override_until",
+    "override_remaining_minutes",
     "override_suppressed",
     "active_schedule_index",
     "confidence",
@@ -69,6 +70,7 @@ NORMAL_ROOM_KEYS = {
     "cover_reason",
     "active_cover_schedule_index",
     "active_heat_sources",
+    "climate",
 }
 
 OUTDOOR_ROOM_KEYS = {
@@ -88,6 +90,7 @@ OUTDOOR_ROOM_KEYS = {
     "override_heat",
     "override_cool",
     "override_until",
+    "override_remaining_minutes",
     "override_suppressed",
     "active_schedule_index",
     "confidence",
@@ -106,6 +109,7 @@ OUTDOOR_ROOM_KEYS = {
     "active_cover_schedule_index",
     "q_occupancy",
     "active_heat_sources",
+    "climate",
 }
 
 

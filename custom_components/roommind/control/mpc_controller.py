@@ -8,6 +8,7 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, cast
 
+from homeassistant.components.climate.const import PRESET_ECO, PRESET_NONE
 from homeassistant.core import HomeAssistant
 
 from ..const import (
@@ -69,6 +70,7 @@ def _cache_entry(service: str, data: dict) -> dict[str, Any]:
     return {
         "service": service,
         "hvac_mode": data.get("hvac_mode"),
+        "preset_mode": data.get("preset_mode"),
         "temperature": data.get("temperature"),
         "target_temp_low": data.get("target_temp_low"),
         "target_temp_high": data.get("target_temp_high"),
@@ -1215,6 +1217,7 @@ class MPCController:
         heat_source_plan: HeatSourcePlan | None = None,
         compressor_forced_on: set[str] | None = None,
         compressor_forced_off: set[str] | None = None,
+        device_preset_mode: str | None = None,
     ) -> None:
         """Apply the determined mode with proportional valve control."""
         _forced_on = compressor_forced_on or set()
@@ -1257,6 +1260,11 @@ class MPCController:
 
         _exclude = exclude_eids or set()
         thermostats = [e for e in self.thermostats if e not in _exclude]
+
+        # Align child device presets with the resolved automatic policy before
+        # sending setpoints, so a device sitting in its own eco/comfort preset
+        # doesn't clamp or override the temperature we command.
+        await self._sync_device_presets(thermostats + self.acs, desired_preset=device_preset_mode)
 
         # Managed mode (no external sensor) with auto climate mode and
         # both device types: activate each device in its natural mode so
@@ -1630,6 +1638,42 @@ class MPCController:
             return PROPORTIONAL_DEADBAND_NEAR_TARGET_C
         return PROPORTIONAL_DEADBAND_C
 
+    async def _sync_device_presets(self, entity_ids: list[str], *, desired_preset: str | None) -> None:
+        """Align child climate presets with RoomMind's resolved automatic mode."""
+        for entity_id in entity_ids:
+            await self._sync_device_preset(entity_id, desired_preset=desired_preset)
+
+    async def _sync_device_preset(self, entity_id: str, *, desired_preset: str | None) -> None:
+        """Send preset changes only for devices that expose preset support.
+
+        When ``desired_preset`` is set and supported, push it. When it is ``None``
+        (RoomMind is not in an automatic eco policy) only *undo* a stale eco preset
+        we may have set earlier, leaving any user-chosen preset untouched.
+        """
+        state = self.hass.states.get(entity_id)
+        if state is None:
+            return
+
+        preset_modes = state.attributes.get("preset_modes") or []
+        if not preset_modes:
+            return
+
+        current_preset = state.attributes.get("preset_mode")
+        if current_preset is None and _should_use_cache(state):
+            current_preset = (_last_commands.get(entity_id) or {}).get("preset_mode")
+
+        if desired_preset is not None:
+            if desired_preset not in preset_modes:
+                return
+            await self._call("set_preset_mode", {"entity_id": entity_id, "preset_mode": desired_preset})
+            return
+
+        if current_preset != PRESET_ECO:
+            return
+        if PRESET_NONE not in preset_modes:
+            return
+        await self._call("set_preset_mode", {"entity_id": entity_id, "preset_mode": PRESET_NONE})
+
     async def _call(self, service: str, data: dict, *, temp_intent: str = "", deadband: float | None = None) -> None:
         eid = data.get("entity_id")
         state = self.hass.states.get(eid) if eid else None
@@ -1774,6 +1818,8 @@ class MPCController:
         if state:
             if service == "set_hvac_mode" and state.state == data.get("hvac_mode"):
                 skip = True
+            elif service == "set_preset_mode" and state.attributes.get("preset_mode") == data.get("preset_mode"):
+                skip = True
             elif service == "set_temperature":
                 # Dual-setpoint (range) devices: proportional deadband is intentionally
                 # NOT applied here — it only governs single-setpoint gentle-regime sends.
@@ -1810,6 +1856,9 @@ class MPCController:
             if cached is not None and cached.get("service") == service:
                 if service == "set_hvac_mode":
                     if cached.get("hvac_mode") == data.get("hvac_mode"):
+                        skip = True
+                elif service == "set_preset_mode":
+                    if cached.get("preset_mode") == data.get("preset_mode"):
                         skip = True
                 elif service == "set_temperature":
                     if "target_temp_low" in data:

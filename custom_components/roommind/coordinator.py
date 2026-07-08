@@ -7,6 +7,7 @@ import time
 from datetime import timedelta
 from typing import Any
 
+from homeassistant.components.climate.const import PRESET_ECO
 from homeassistant.components.persistent_notification import async_create as async_create_notification
 from homeassistant.components.persistent_notification import async_dismiss as async_dismiss_notification
 from homeassistant.config_entries import ConfigEntry
@@ -819,6 +820,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
                 area_id,
             )
         else:
+            device_preset_mode = self._device_preset_for_room(room, settings, schedule_blocks, schedule_entity_id)
             try:
                 await controller.async_apply(
                     mode,
@@ -832,6 +834,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
                     heat_source_plan=heat_source_plan,
                     compressor_forced_on=compressor_forced_on or None,
                     compressor_forced_off=compressor_forced_off or None,
+                    device_preset_mode=device_preset_mode,
                 )
             except Exception:  # noqa: BLE001
                 _LOGGER.warning(
@@ -1558,6 +1561,58 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         if settings.get("schedule_off_action", "eco") == "off":
             return TargetTemps(heat=None, cool=None)
         return TargetTemps(heat=eco_heat, cool=eco_cool)
+
+    def _device_preset_for_room(
+        self,
+        room: dict,
+        settings: dict,
+        schedule_blocks: dict | None,
+        schedule_entity_id: str | None,
+    ) -> str | None:
+        """Preset to push to preset-capable child climates for the resolved policy.
+
+        Mirrors the eco-producing branches of :meth:`_resolve_target_temps` so
+        child devices that expose their own eco/comfort presets don't clamp the
+        setpoint RoomMind sends. Returns ``PRESET_ECO`` when the automatic policy
+        is eco (presence-away eco or schedule-off eco), otherwise ``None`` — which
+        also clears a stale device eco preset. Explicit setpoints (override,
+        vacation) are not eco and return ``None``. Keep this in sync with the
+        return branches of :meth:`_resolve_target_temps`.
+        """
+        from .utils.schedule_utils import find_active_block
+
+        # 1. Override — explicit setpoint, not eco (matches priority 1).
+        override_heat = room.get("override_heat")
+        override_cool = room.get("override_cool")
+        override_until = room.get("override_until")
+        if override_heat is not None or override_cool is not None:
+            if override_until is None or time.time() < override_until:
+                presence_away_now = not room.get("ignore_presence", False) and self._is_presence_away(room, settings)
+                if not (presence_away_now and bool(settings.get("presence_clears_override", False))):
+                    return None
+
+        # 2. Vacation — explicit setback setpoint, not eco (matches priority 2).
+        vacation_until = settings.get("vacation_until")
+        if vacation_until is not None and time.time() < vacation_until and settings.get("vacation_temp") is not None:
+            return None
+
+        # 2.5 Presence-away eco (matches priority 2.5).
+        if not room.get("ignore_presence", False) and self._is_presence_away(room, settings):
+            return PRESET_ECO if settings.get("presence_away_action", "eco") == "eco" else None
+
+        # 3. Schedule — eco only when the schedule is off (no active block).
+        if not schedule_entity_id:
+            return None
+        eco_preset = PRESET_ECO if settings.get("schedule_off_action", "eco") == "eco" else None
+        state = self.hass.states.get(schedule_entity_id)
+        if state is None or state.state in ("unavailable", "unknown"):
+            # #308: derive on/off from cached blocks while the entity flickers.
+            if schedule_blocks is None:
+                return None
+            return None if find_active_block(schedule_blocks, time.time()) is not None else eco_preset
+        if state.state == SCHEDULE_STATE_ON:
+            return None
+        return eco_preset
 
     async def async_room_added(self, room: dict) -> None:
         """Create entity platform entities for a newly added/updated room and refresh data."""
